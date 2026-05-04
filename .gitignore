@@ -1,0 +1,212 @@
+# =========================
+# .NET / ASP.NET Core
+# =========================
+bin/
+obj/
+[Bb]uild/
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+
+*.user
+*.rsuser
+*.suo
+*.userosscache
+*.sln.docstates
+*.nupkg
+*.snupkg
+*.symbols.nupkg
+*.pdb
+*.mdb
+*.opendb
+*.VC.db
+*.cache
+*.ilk
+*.log
+*.tlog
+*.lastbuildstate
+
+# Rider / ReSharper
+.idea/
+_ReSharper*/
+*.DotSettings.user
+
+# Visual Studio
+.vs/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/launch.json
+!.vscode/tasks.json
+
+# =========================
+# ASP.NET local config / secrets
+# =========================
+# Không commit file config môi trường có secret thật
+**/appsettings.Development.json
+**/appsettings.Local.json
+**/appsettings.Production.json
+**/appsettings.Staging.json
+**/appsettings.*.local.json
+
+# Giữ lại file mẫu nếu có
+!**/appsettings.example.json
+!**/appsettings.Sample.json
+
+# User secrets / local secrets
+secrets.json
+*.secrets.json
+*.secret.json
+
+# =========================
+# Environment files
+# =========================
+.env
+.env.*
+!.env.example
+!.env.sample
+
+# =========================
+# Docker local override
+# =========================
+docker-compose.override.yml
+docker-compose.local.yml
+docker-compose.*.override.yml
+
+# =========================
+# Database dumps / backups
+# =========================
+*.dump
+*.sql.gz
+*.backup
+*.bak
+*.db
+*.sqlite
+*.sqlite3
+pgdata/
+postgres-data/
+mysql-data/
+redis-data/
+
+# Không ignore migrations/ vì cần commit migration SQL
+!migrations/
+!migrations/*.sql
+
+# =========================
+# Redis / local runtime data
+# =========================
+dump.rdb
+appendonly.aof
+appendonlydir/
+redis.log
+
+# =========================
+# Logs / runtime files
+# =========================
+logs/
+log/
+*.log
+*.log.*
+*.tmp
+*.temp
+tmp/
+temp/
+
+# =========================
+# Test / coverage
+# =========================
+TestResults/
+coverage/
+coverage.xml
+coverage.json
+lcov.info
+*.coverage
+*.coveragexml
+.coverage/
+.nyc_output/
+
+# =========================
+# NuGet
+# =========================
+packages/
+*.nupkg
+project.lock.json
+project.assets.json
+
+# Nếu dùng packages.lock.json để lock dependency thì nên commit
+!packages.lock.json
+
+# =========================
+# Frontend dashboard local files
+# =========================
+node_modules/
+dist/
+.cache/
+.parcel-cache/
+.eslintcache
+
+# Không ignore dashboard source vì dashboard HTML/CSS/JS cần commit
+!src/**/wwwroot/
+!src/**/wwwroot/dashboard/
+!src/**/wwwroot/dashboard/*.html
+!src/**/wwwroot/dashboard/*.css
+!src/**/wwwroot/dashboard/*.js
+
+# =========================
+# OS files
+# =========================
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# =========================
+# Editor swap files
+# =========================
+*.swp
+*.swo
+*~
+*.tmp
+
+# =========================
+# Certificates / keys
+# =========================
+*.pem
+*.key
+*.crt
+*.pfx
+*.p12
+*.cer
+
+# =========================
+# Local generated archives
+# =========================
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.rar
+*.7z
+
+# =========================
+# AI Gateway specific
+# =========================
+# File seed local có thể chứa API key thật
+examples/seed.local.sql
+examples/*.local.sql
+
+# File export config local
+exports/
+backups/
+
+# Không ignore docs/examples mẫu
+!docs/
+!docs/**
+!examples/
+!examples/**
+!examples/http/
+!examples/http/**

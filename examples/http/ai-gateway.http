@@ -1,0 +1,85 @@
+@baseUrl = http://localhost:8080
+@adminKey = change-me-admin-key
+
+### Health
+GET {{baseUrl}}/health
+
+### DB ping
+GET {{baseUrl}}/v1/debug/db/ping
+X-Admin-Key: {{adminKey}}
+
+### Redis ping
+GET {{baseUrl}}/v1/debug/redis/ping
+X-Admin-Key: {{adminKey}}
+
+### Create model
+POST {{baseUrl}}/v1/admin/models
+Content-Type: application/json
+X-Admin-Key: {{adminKey}}
+
+{
+  "code": "text-fast",
+  "name": "Fast Text Model",
+  "defaultTemperature": 0.7,
+  "defaultMaxTokens": 1000,
+  "maxRetry": 3
+}
+
+### Create Gemini partner
+POST {{baseUrl}}/v1/admin/partners
+Content-Type: application/json
+X-Admin-Key: {{adminKey}}
+
+{
+  "code": "gemini",
+  "name": "Google Gemini",
+  "adapterCode": "gemini",
+  "baseUrl": "https://generativelanguage.googleapis.com",
+  "weight": 100,
+  "qualityScore": 85
+}
+
+### Create Gemini account
+POST {{baseUrl}}/v1/admin/partners/gemini/accounts
+Content-Type: application/json
+X-Admin-Key: {{adminKey}}
+
+{
+  "code": "gemini_acc_01",
+  "name": "Gemini Account 01",
+  "apiKey": "REPLACE_WITH_REAL_KEY",
+  "rpmLimit": 15,
+  "rpdLimit": 1500,
+  "weight": 100
+}
+
+### Create model route
+POST {{baseUrl}}/v1/admin/models/text-fast/routes
+Content-Type: application/json
+X-Admin-Key: {{adminKey}}
+
+{
+  "partnerCode": "gemini",
+  "routeCode": "default",
+  "providerModel": "gemini-1.5-flash",
+  "timeoutMs": 30000,
+  "weight": 100
+}
+
+### Generate
+POST {{baseUrl}}/v1/ai/generate
+Content-Type: application/json
+X-AI-Client: product-service
+
+{
+  "model": "text-fast",
+  "systemPrompt": "Bạn là trợ lý viết nội dung bán hàng.",
+  "prompt": "Viết mô tả sản phẩm áo thun nam cotton, phong cách trẻ trung.",
+  "debug": true,
+  "clientCode": "product-service",
+  "featureCode": "product_description"
+}
+
+### Dashboard overview
+GET {{baseUrl}}/v1/dashboard/overview
+X-Admin-Key: {{adminKey}}

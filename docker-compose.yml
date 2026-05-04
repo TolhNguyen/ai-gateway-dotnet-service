@@ -1,0 +1,61 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: ai-gateway-postgres
+    environment:
+      POSTGRES_DB: ai_gateway
+      POSTGRES_USER: ai_gateway
+      POSTGRES_PASSWORD: ai_gateway
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./migrations/001_init.sql:/docker-entrypoint-initdb.d/001_init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ai_gateway -d ai_gateway"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    container_name: ai-gateway-redis
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  ai-gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ai-gateway-api
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__Postgres: Host=postgres;Port=5432;Database=ai_gateway;Username=ai_gateway;Password=ai_gateway
+      Redis__ConnectionString: redis:6379
+      AiGateway__RequireClientAuth: "false"
+      AiGateway__EncryptionKeyBase64: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+      AiGateway__MetricFlushSeconds: "30"
+      AiGateway__ErrorEventsRetentionDays: "62"
+      AiGateway__ConfigCacheSeconds: "60"
+      AiGateway__ErrorEventsMaxPerAccountTypeHour: "20"
+      AdminAuth__Enabled: "true"
+      AdminAuth__ApiKeyHash: "5GzOzBaR2vJw4Vorydf4HdCF/PZCpuWc195rv3lrgb4="
+    ports:
+      - "8080:8080"
+
+volumes:
+  postgres_data:
+  redis_data:
