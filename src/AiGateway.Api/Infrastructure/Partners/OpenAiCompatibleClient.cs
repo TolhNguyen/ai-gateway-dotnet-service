@@ -263,7 +263,7 @@ public sealed class OpenAiCompatibleClient : IAiPartnerClient
                 }
             }
 
-            if (root.TryGetProperty("message", out var message)) return new ErrorInfo(message.GetString() ?? raw, null);
+            if (root.TryGetProperty("message", out var rootMessage)) return new ErrorInfo(rootMessage.GetString() ?? raw, null);
             return new ErrorInfo(raw, null);
         }
         catch
