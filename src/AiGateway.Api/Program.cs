@@ -58,7 +58,6 @@ builder.Services.AddSingleton(_ =>
         ?? throw new InvalidOperationException("Missing ConnectionStrings:Postgres");
 
     var dataSourceBuilder = new NpgsqlDataSourceBuilder(connectionString);
-    dataSourceBuilder.EnableDynamicJson();
     return dataSourceBuilder.Build();
 });
 
