@@ -42,17 +42,20 @@ services:
       redis:
         condition: service_healthy
     environment:
-      ASPNETCORE_ENVIRONMENT: Development
-      ConnectionStrings__Postgres: Host=postgres;Port=5432;Database=ai_gateway;Username=ai_gateway;Password=ai_gateway
-      Redis__ConnectionString: redis:6379
-      AiGateway__RequireClientAuth: "false"
-      AiGateway__EncryptionKeyBase64: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
-      AiGateway__MetricFlushSeconds: "30"
-      AiGateway__ErrorEventsRetentionDays: "62"
-      AiGateway__ConfigCacheSeconds: "60"
-      AiGateway__ErrorEventsMaxPerAccountTypeHour: "20"
-      AdminAuth__Enabled: "true"
-      AdminAuth__ApiKeyHash: "5GzOzBaR2vJw4Vorydf4HdCF/PZCpuWc195rv3lrgb4="
+        ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT}
+        ConnectionStrings__Postgres: ${POSTGRES_CONNECTION_STRING}
+        Redis__ConnectionString: ${REDIS_CONNECTION_STRING}
+        AiGateway__RequireClientAuth: ${AI_GATEWAY_REQUIRE_CLIENT_AUTH}
+        AiGateway__EncryptionKeyBase64: ${AI_GATEWAY_ENCRYPTION_KEY_BASE64}
+        AiGateway__MetricFlushSeconds: ${AI_GATEWAY_METRIC_FLUSH_SECONDS}
+        AiGateway__ErrorEventsRetentionDays: ${AI_GATEWAY_ERROR_EVENTS_RETENTION_DAYS}
+        AiGateway__ConfigCacheSeconds: ${AI_GATEWAY_CONFIG_CACHE_SECONDS}
+        AiGateway__ErrorEventsMaxPerAccountTypeHour: ${AI_GATEWAY_ERROR_EVENTS_MAX_PER_ACCOUNT_TYPE_HOUR}
+        AiGateway__DefaultReservedOutputTokens: ${AI_GATEWAY_DEFAULT_RESERVED_OUTPUT_TOKENS}
+        AiGateway__ExposeRoutingWhenDebug: ${AI_GATEWAY_EXPOSE_ROUTING_WHEN_DEBUG}
+        AdminAuth__Enabled: ${ADMIN_AUTH_ENABLED}
+        AdminAuth__ApiKeyHash: ${ADMIN_AUTH_API_KEY_HASH}
+        AdminAuth__AllowInDevelopmentWithoutKey: ${ADMIN_AUTH_ALLOW_IN_DEVELOPMENT_WITHOUT_KEY}
     ports:
       - "8080:8080"
 

@@ -1,6 +1,26 @@
-# =========================
-# .NET / ASP.NET Core
-# =========================
+# =========================================================
+# OS / Editor
+# =========================================================
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*.tmp
+*.temp
+
+.vscode/*
+!.vscode/settings.json
+!.vscode/launch.json
+!.vscode/tasks.json
+.idea/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# =========================================================
+# .NET / C# build output
+# =========================================================
 bin/
 obj/
 [Bb]uild/
@@ -11,202 +31,181 @@ x86/
 [Aa][Rr][Mm]/
 [Aa][Rr][Mm]64/
 
-*.user
-*.rsuser
-*.suo
-*.userosscache
-*.sln.docstates
+TestResults/
+coverage/
+coverage.xml
+coverage.cobertura.xml
+*.trx
+*.coverage
+*.coveragexml
+
+# NuGet
 *.nupkg
 *.snupkg
-*.symbols.nupkg
-*.pdb
-*.mdb
-*.opendb
-*.VC.db
-*.cache
-*.ilk
-*.log
-*.tlog
-*.lastbuildstate
+.nuget/
+packages/
+project.lock.json
+project.assets.json
 
 # Rider / ReSharper
-.idea/
 _ReSharper*/
 *.DotSettings.user
 
-# Visual Studio
-.vs/
-.vscode/*
-!.vscode/extensions.json
-!.vscode/launch.json
-!.vscode/tasks.json
+# =========================================================
+# Frontend / dashboard local files
+# =========================================================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+dist/
+.cache/
 
-# =========================
-# ASP.NET local config / secrets
-# =========================
-# Không commit file config môi trường có secret thật
-**/appsettings.Development.json
-**/appsettings.Local.json
-**/appsettings.Production.json
-**/appsettings.Staging.json
-**/appsettings.*.local.json
-
-# Giữ lại file mẫu nếu có
-!**/appsettings.example.json
-!**/appsettings.Sample.json
-
-# User secrets / local secrets
-secrets.json
-*.secrets.json
-*.secret.json
-
-# =========================
-# Environment files
-# =========================
+# =========================================================
+# Secrets / environment files
+# =========================================================
 .env
 .env.*
+*.env
+
+# Allow committed examples/templates
 !.env.example
 !.env.sample
+!.env.template
 
-# =========================
-# Docker local override
-# =========================
+# Local appsettings that may contain secrets
+appsettings.Development.json
+appsettings.Production.json
+appsettings.Staging.json
+appsettings.Local.json
+appsettings.*.local.json
+appsettings.*.secret.json
+
+# Allow committed appsettings template files
+!appsettings.json
+!appsettings.example.json
+!appsettings.sample.json
+
+# ASP.NET user secrets should never be committed
+secrets.json
+
+# =========================================================
+# Certificates / keys / credentials
+# =========================================================
+*.pem
+*.key
+*.pfx
+*.p12
+*.crt
+*.cer
+*.csr
+*.jks
+*.keystore
+id_rsa
+id_rsa.pub
+id_ed25519
+id_ed25519.pub
+*.private
+*.secret
+credentials.json
+service-account*.json
+google-credentials*.json
+
+# =========================================================
+# Docker local overrides
+# =========================================================
 docker-compose.override.yml
 docker-compose.local.yml
-docker-compose.*.override.yml
+docker-compose.*.local.yml
 
-# =========================
-# Database dumps / backups
-# =========================
-*.dump
-*.sql.gz
-*.backup
-*.bak
+# Keep sample docker compose files
+!docker-compose.example.yml
+!docker-compose.sample.yml
+
+# =========================================================
+# Database / Redis / local runtime data
+# =========================================================
+postgres-data/
+pgdata/
+redis-data/
+data/
+.local-data/
+runtime-data/
+
 *.db
 *.sqlite
 *.sqlite3
-pgdata/
-postgres-data/
-mysql-data/
-redis-data/
+*.bak
+*.dump
+*.sql.gz
+*.sql.zip
 
-# Không ignore migrations/ vì cần commit migration SQL
-!migrations/
+# Do not commit local seed files that may contain real keys
+seed.local.sql
+*.local.sql
+*.secret.sql
+
+# But keep migration and example SQL files
 !migrations/*.sql
+!examples/*.sql
 
-# =========================
-# Redis / local runtime data
-# =========================
-dump.rdb
-appendonly.aof
-appendonlydir/
-redis.log
-
-# =========================
-# Logs / runtime files
-# =========================
+# =========================================================
+# Logs
+# =========================================================
 logs/
 log/
 *.log
 *.log.*
-*.tmp
-*.temp
-tmp/
-temp/
+*.err
+*.out
 
-# =========================
-# Test / coverage
-# =========================
-TestResults/
-coverage/
-coverage.xml
-coverage.json
-lcov.info
-*.coverage
-*.coveragexml
-.coverage/
-.nyc_output/
-
-# =========================
-# NuGet
-# =========================
-packages/
-*.nupkg
-project.lock.json
-project.assets.json
-
-# Nếu dùng packages.lock.json để lock dependency thì nên commit
-!packages.lock.json
-
-# =========================
-# Frontend dashboard local files
-# =========================
-node_modules/
-dist/
-.cache/
-.parcel-cache/
-.eslintcache
-
-# Không ignore dashboard source vì dashboard HTML/CSS/JS cần commit
-!src/**/wwwroot/
-!src/**/wwwroot/dashboard/
-!src/**/wwwroot/dashboard/*.html
-!src/**/wwwroot/dashboard/*.css
-!src/**/wwwroot/dashboard/*.js
-
-# =========================
-# OS files
-# =========================
-.DS_Store
-.AppleDouble
-.LSOverride
-Thumbs.db
-ehthumbs.db
-Desktop.ini
-
-# =========================
-# Editor swap files
-# =========================
-*.swp
-*.swo
-*~
-*.tmp
-
-# =========================
-# Certificates / keys
-# =========================
-*.pem
-*.key
-*.crt
-*.pfx
-*.p12
-*.cer
-
-# =========================
-# Local generated archives
-# =========================
+# =========================================================
+# Publish / deployment artifacts
+# =========================================================
+publish/
+artifacts/
+.deploy/
+deploy/
 *.zip
 *.tar
 *.tar.gz
-*.tgz
-*.rar
-*.7z
 
-# =========================
-# AI Gateway specific
-# =========================
-# File seed local có thể chứa API key thật
-examples/seed.local.sql
-examples/*.local.sql
+# =========================================================
+# Repomix / generated AI review bundles
+# =========================================================
+repomix-output.*
+*.repomix.*
 
-# File export config local
-exports/
-backups/
 
-# Không ignore docs/examples mẫu
-!docs/
-!docs/**
-!examples/
-!examples/**
-!examples/http/
-!examples/http/**
+# Environment / secrets
+.env
+.env.*
+*.env
+
+# Cho phép commit file mẫu
+!.env.example
+
+# Local appsettings có thể chứa secret
+appsettings.Development.json
+appsettings.Production.json
+appsettings.Staging.json
+appsettings.Local.json
+appsettings.*.local.json
+
+# Cert / key
+*.pem
+*.key
+*.pfx
+*.p12
+*.crt
+*.cer
+
+# Docker local override
+docker-compose.override.yml
+docker-compose.local.yml
+
+# Local data
+postgres-data/
+redis-data/
+data/
