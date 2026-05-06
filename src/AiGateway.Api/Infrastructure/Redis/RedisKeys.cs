@@ -4,23 +4,29 @@ public static class RedisKeys
 {
     public const int RuntimeRetentionSeconds = 65 * 24 * 60 * 60;
 
+    // Dùng Lua script để đảm bảo tính nguyên tử
     public static string ClientRateMinute(string clientCode, string bucket)
-        => $"ai:rate:client:{clientCode}:m:{bucket}";
+    => $"ai:rate:{{client:{clientCode}}}:m:{bucket}";
 
+    // Dùng Lua script để đảm bảo tính nguyên tử
     public static string ClientRateDay(string clientCode, string bucket)
-        => $"ai:rate:client:{clientCode}:d:{bucket}";
+    => $"ai:rate:{{client:{clientCode}}}:d:{bucket}";
 
+    // Dùng Lua script để đảm bảo tính nguyên tử
     public static string AccountReqMinute(string accountCode, string modelCode, string bucket)
-        => $"ai:quota:req:account:{accountCode}:model:{modelCode}:m:{bucket}";
+    => $"ai:quota:req:{{account:{accountCode}:model:{modelCode}}}:m:{bucket}";
 
+    // Dùng Lua script để đảm bảo tính nguyên tử
     public static string AccountReqDay(string accountCode, string modelCode, string bucket)
-        => $"ai:quota:req:account:{accountCode}:model:{modelCode}:d:{bucket}";
+    => $"ai:quota:req:{{account:{accountCode}:model:{modelCode}}}:d:{bucket}";
 
+    // Dùng Lua script để đảm bảo tính nguyên tử
     public static string AccountTokMinute(string accountCode, string modelCode, string bucket)
-        => $"ai:quota:tok:account:{accountCode}:model:{modelCode}:m:{bucket}";
+    => $"ai:quota:tok:{{account:{accountCode}:model:{modelCode}}}:m:{bucket}";
 
+    // Dùng Lua script để đảm bảo tính nguyên tử
     public static string AccountTokDay(string accountCode, string modelCode, string bucket)
-        => $"ai:quota:tok:account:{accountCode}:model:{modelCode}:d:{bucket}";
+    => $"ai:quota:tok:{{account:{accountCode}:model:{modelCode}}}:d:{bucket}";
 
     public static string CooldownPartner(string partnerCode)
         => $"ai:cooldown:partner:{partnerCode}";
