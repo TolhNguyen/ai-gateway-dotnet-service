@@ -54,8 +54,22 @@ builder.Services
 
 builder.Services.AddSingleton(_ =>
 {
-    var connectionString = builder.Configuration.GetConnectionString("Postgres")
-        ?? throw new InvalidOperationException("Missing ConnectionStrings:Postgres");
+    var connectionString =
+        Environment.GetEnvironmentVariable("ConnectionStrings__Postgres")
+        ?? Environment.GetEnvironmentVariable("POSTGRES_CONNECTION_STRING")
+        ?? builder.Configuration.GetConnectionString("Postgres")
+        ?? throw new InvalidOperationException("Missing PostgreSQL connection string");
+
+    if (builder.Environment.IsProduction() &&
+        (connectionString.Contains("localhost", StringComparison.OrdinalIgnoreCase) ||
+         connectionString.Contains("127.0.0.1", StringComparison.OrdinalIgnoreCase)))
+    {
+        throw new InvalidOperationException(
+            "Production is using local PostgreSQL. Set ConnectionStrings__Postgres in Render Environment.");
+    }
+
+    var pg = new NpgsqlConnectionStringBuilder(connectionString);
+    Console.WriteLine($"Postgres config loaded. Host={pg.Host}, Database={pg.Database}, Username={pg.Username}");
 
     var dataSourceBuilder = new NpgsqlDataSourceBuilder(connectionString);
     return dataSourceBuilder.Build();
