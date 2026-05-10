@@ -106,15 +106,23 @@ builder.Services.AddScoped<AiRouteSelector>();
 builder.Services.AddScoped<TokenEstimator>();
 builder.Services.AddScoped<ErrorRecordingService>();
 builder.Services.AddScoped<AiGatewayService>();
+builder.Services.AddScoped<DataSeeder>();
 
 builder.Services.AddScoped<IAiPartnerClient, OpenAiCompatibleClient>();
 builder.Services.AddScoped<IAiPartnerClient, GeminiClient>();
+builder.Services.AddScoped<IAiPartnerClient, OpenRouterClient>();
 builder.Services.AddScoped<PartnerClientFactory>();
 
 builder.Services.AddHostedService<MetricFlushWorker>();
 builder.Services.AddHostedService<CleanupWorker>();
 
 var app = builder.Build();
+
+using (var scope = app.Services.CreateScope())
+{
+    var seeder = scope.ServiceProvider.GetRequiredService<DataSeeder>();
+    await seeder.SeedAsync();
+}
 
 app.UseMiddleware<AdminAuthMiddleware>();
 app.UseStaticFiles();
