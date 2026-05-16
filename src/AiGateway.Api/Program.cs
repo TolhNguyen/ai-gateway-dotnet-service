@@ -77,10 +77,46 @@ builder.Services.AddSingleton(_ =>
 
 builder.Services.AddSingleton<IConnectionMultiplexer>(_ =>
 {
-    var connectionString = builder.Configuration["Redis:ConnectionString"]
-        ?? throw new InvalidOperationException("Missing Redis:ConnectionString");
+    var redisConnectionString =
+        builder.Configuration["Redis:ConnectionString"]
+        ?? Environment.GetEnvironmentVariable("Redis__ConnectionString")
+        ?? Environment.GetEnvironmentVariable("REDIS_CONNECTION_STRING")
+        ?? "localhost:6379";
 
-    return ConnectionMultiplexer.Connect(connectionString);
+    if (redisConnectionString.StartsWith("redis://", StringComparison.OrdinalIgnoreCase) ||
+        redisConnectionString.StartsWith("rediss://", StringComparison.OrdinalIgnoreCase))
+    {
+        var uri = new Uri(redisConnectionString);
+
+        var options = new ConfigurationOptions
+        {
+            EndPoints = { { uri.Host, uri.Port } },
+            Ssl = uri.Scheme.Equals("rediss", StringComparison.OrdinalIgnoreCase),
+            AbortOnConnectFail = false
+        };
+
+        if (!string.IsNullOrWhiteSpace(uri.UserInfo))
+        {
+            var parts = uri.UserInfo.Split(':', 2);
+
+            if (parts.Length == 2)
+            {
+                options.User = Uri.UnescapeDataString(parts[0]);
+                options.Password = Uri.UnescapeDataString(parts[1]);
+            }
+            else
+            {
+                options.Password = Uri.UnescapeDataString(parts[0]);
+            }
+        }
+
+        return ConnectionMultiplexer.Connect(options);
+    }
+
+    var parsed = ConfigurationOptions.Parse(redisConnectionString);
+    parsed.AbortOnConnectFail = false;
+
+    return ConnectionMultiplexer.Connect(parsed);
 });
 
 builder.Services.AddHttpClient("ai-partners", client =>
