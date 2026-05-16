@@ -88,15 +88,15 @@ public sealed class AiMetricsRepository
     {
         const string sql = """
         SELECT
-            COALESCE(SUM(total_count), 0) AS total,
-            COALESCE(SUM(success_count), 0) AS success,
-            COALESCE(SUM(failed_count), 0) AS failed,
-            COALESCE(SUM(fallback_success_count), 0) AS fallback_success,
-            COALESCE(SUM(input_tokens), 0) AS tokens_in,
-            COALESCE(SUM(output_tokens), 0) AS tokens_out,
-            COALESCE(SUM(total_tokens), 0) AS tokens_total,
-            COALESCE(SUM(latency_total_ms), 0) AS latency_total_ms,
-            COALESCE(SUM(latency_count), 0) AS latency_count
+            COALESCE(SUM(total_count), 0)::bigint AS "Total",
+            COALESCE(SUM(success_count), 0)::bigint AS "Success",
+            COALESCE(SUM(failed_count), 0)::bigint AS "Failed",
+            COALESCE(SUM(fallback_success_count), 0)::bigint AS "FallbackSuccess",
+            COALESCE(SUM(input_tokens), 0)::bigint AS "TokensIn",
+            COALESCE(SUM(output_tokens), 0)::bigint AS "TokensOut",
+            COALESCE(SUM(total_tokens), 0)::bigint AS "TokensTotal",
+            COALESCE(SUM(latency_total_ms), 0)::bigint AS "LatencyTotalMs",
+            COALESCE(SUM(latency_count), 0)::bigint AS "LatencyCount"
         FROM ai_request_metrics_hourly
         WHERE bucket_hour >= @From AND bucket_hour < @To;
         """;
@@ -133,16 +133,16 @@ public sealed class AiMetricsRepository
 
         var sql = $"""
         SELECT
-            {column} AS code,
-            COALESCE(SUM(total_count), 0) AS total,
-            COALESCE(SUM(success_count), 0) AS success,
-            COALESCE(SUM(failed_count), 0) AS failed,
-            COALESCE(SUM(latency_total_ms), 0) AS latency_total_ms,
-            COALESCE(SUM(latency_count), 0) AS latency_count
+            {column} AS "Code",
+            COALESCE(SUM(total_count), 0)::bigint AS "Total",
+            COALESCE(SUM(success_count), 0)::bigint AS "Success",
+            COALESCE(SUM(failed_count), 0)::bigint AS "Failed",
+            COALESCE(SUM(latency_total_ms), 0)::bigint AS "LatencyTotalMs",
+            COALESCE(SUM(latency_count), 0)::bigint AS "LatencyCount"
         FROM ai_request_metrics_hourly
         WHERE bucket_hour >= @From AND bucket_hour < @To
         GROUP BY {column}
-        ORDER BY total DESC;
+        ORDER BY "Total" DESC;
         """;
 
         await using var connection = await _dataSource.OpenConnectionAsync();
