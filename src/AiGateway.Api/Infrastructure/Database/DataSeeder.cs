@@ -148,6 +148,17 @@ public sealed class DataSeeder
             },
             new AccountSeed
             {
+                PartnerCode = "gemini",
+                Code        = "gemini_acc_02",
+                Name        = "Gemini Free Account",
+                RpmLimit    = 15,
+                RpdLimit    = 1500,
+                TpmLimit    = 1_000_000,
+                TpdLimit    = null,
+                Weight      = 100
+            },
+            new AccountSeed
+            {
                 PartnerCode = "groq",
                 Code        = "groq_acc_01",
                 Name        = "Groq Free Account",

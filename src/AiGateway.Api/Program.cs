@@ -120,6 +120,7 @@ var app = builder.Build();
 
 using (var scope = app.Services.CreateScope())
 {
+    await RunMigrationsAsync(scope.ServiceProvider);
     var seeder = scope.ServiceProvider.GetRequiredService<DataSeeder>();
     await seeder.SeedAsync();
 }
@@ -130,3 +131,62 @@ app.MapControllers();
 app.MapGet("/", () => Results.Redirect("/dashboard/index.html"));
 
 app.Run();
+static async Task RunMigrationsAsync(IServiceProvider services)
+{
+    var logger = services
+        .GetRequiredService<ILoggerFactory>()
+        .CreateLogger("MigrationRunner");
+
+    var dataSource = services.GetRequiredService<NpgsqlDataSource>();
+
+    var migrationDir = FindMigrationDirectory();
+
+    if (migrationDir is null)
+    {
+        throw new InvalidOperationException("Migration directory not found. Expected a 'migrations' folder in the app directory.");
+    }
+
+    var files = Directory
+        .GetFiles(migrationDir, "*.sql")
+        .OrderBy(x => x)
+        .ToArray();
+
+    if (files.Length == 0)
+    {
+        throw new InvalidOperationException($"No SQL migration files found in: {migrationDir}");
+    }
+
+    await using var connection = await dataSource.OpenConnectionAsync();
+
+    foreach (var file in files)
+    {
+        var sql = await File.ReadAllTextAsync(file);
+
+        if (string.IsNullOrWhiteSpace(sql))
+        {
+            continue;
+        }
+
+        logger.LogInformation("Applying migration: {File}", Path.GetFileName(file));
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        command.CommandTimeout = 120;
+        await command.ExecuteNonQueryAsync();
+
+        logger.LogInformation("Applied migration: {File}", Path.GetFileName(file));
+    }
+}
+
+static string? FindMigrationDirectory()
+{
+    var candidates = new[]
+    {
+        Path.Combine(AppContext.BaseDirectory, "migrations"),
+        Path.Combine(Directory.GetCurrentDirectory(), "migrations"),
+        Path.Combine(Directory.GetCurrentDirectory(), "..", "migrations"),
+        Path.Combine(Directory.GetCurrentDirectory(), "..", "..", "migrations")
+    };
+
+    return candidates.FirstOrDefault(Directory.Exists);
+}
