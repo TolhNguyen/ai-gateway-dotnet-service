@@ -6,16 +6,14 @@ public sealed class PartnerClientFactory
 
     public PartnerClientFactory(IEnumerable<IAiPartnerClient> clients)
     {
-        _clients = clients.ToDictionary(x => x.AdapterCode, StringComparer.OrdinalIgnoreCase);
+        _clients = clients.ToDictionary(c => c.AdapterCode, StringComparer.OrdinalIgnoreCase);
     }
 
-    public IAiPartnerClient GetClient(string adapterCode)
+    public IAiPartnerClient Get(string adapterCode)
     {
-        if (_clients.TryGetValue(adapterCode, out var client))
-        {
-            return client;
-        }
-
-        throw new InvalidOperationException($"AI partner adapter not registered: {adapterCode}");
+        if (_clients.TryGetValue(adapterCode, out var c)) return c;
+        throw new InvalidOperationException($"No partner client registered for adapter '{adapterCode}'.");
     }
+
+    public bool Has(string adapterCode) => _clients.ContainsKey(adapterCode);
 }

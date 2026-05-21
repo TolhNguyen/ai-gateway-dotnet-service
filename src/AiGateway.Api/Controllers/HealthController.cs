@@ -1,4 +1,5 @@
 using Dapper;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Npgsql;
 using StackExchange.Redis;
@@ -6,41 +7,49 @@ using StackExchange.Redis;
 namespace AiGateway.Api.Controllers;
 
 [ApiController]
+[AllowAnonymous]
 public sealed class HealthController : ControllerBase
 {
-    private readonly NpgsqlDataSource _dataSource;
+    private readonly NpgsqlDataSource _ds;
     private readonly IConnectionMultiplexer _redis;
 
-    public HealthController(NpgsqlDataSource dataSource, IConnectionMultiplexer redis)
+    public HealthController(NpgsqlDataSource ds, IConnectionMultiplexer redis)
     {
-        _dataSource = dataSource;
+        _ds = ds;
         _redis = redis;
     }
 
     [HttpGet("/health")]
-    public IActionResult Health()
+    public IActionResult Live() => Ok(new { status = "ok", time = DateTimeOffset.UtcNow });
+
+    [HttpGet("/health/ready")]
+    public async Task<IActionResult> Ready(CancellationToken ct)
     {
-        return Ok(new
+        var pgOk = false; var redisOk = false;
+        string? pgErr = null, redisErr = null;
+
+        try
         {
-            status = "ok",
-            service = "ai-gateway",
-            at = DateTimeOffset.UtcNow
+            await using var conn = await _ds.OpenConnectionAsync(ct);
+            await conn.ExecuteScalarAsync<int>("SELECT 1");
+            pgOk = true;
+        }
+        catch (Exception ex) { pgErr = ex.Message; }
+
+        try
+        {
+            await _redis.GetDatabase().PingAsync();
+            redisOk = true;
+        }
+        catch (Exception ex) { redisErr = ex.Message; }
+
+        var ready = pgOk && redisOk;
+        return StatusCode(ready ? 200 : 503, new
+        {
+            ready,
+            postgres = new { ok = pgOk, error = pgErr },
+            redis = new { ok = redisOk, error = redisErr },
+            time = DateTimeOffset.UtcNow
         });
-    }
-
-    [HttpGet("/v1/debug/db/ping")]
-    public async Task<IActionResult> PingDb()
-    {
-        await using var connection = await _dataSource.OpenConnectionAsync();
-        var result = await connection.ExecuteScalarAsync<int>("SELECT 1");
-        return Ok(new { success = result == 1, db = "postgresql" });
-    }
-
-    [HttpGet("/v1/debug/redis/ping")]
-    public async Task<IActionResult> PingRedis()
-    {
-        var db = _redis.GetDatabase();
-        var ping = await db.PingAsync();
-        return Ok(new { success = true, redis = "connected", pingMs = ping.TotalMilliseconds });
     }
 }

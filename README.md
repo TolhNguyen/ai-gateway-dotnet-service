@@ -1,282 +1,138 @@
-# AI Gateway Service
+# AI Gateway v2
 
-AI Gateway Service là một service độc lập để các service khác gọi AI bằng contract đơn giản:
+A self-contained, multi-tenant AI gateway. Postgres + Redis + the .NET 9 API all run inside a single Docker image — no `docker compose`, no external services.
 
-```json
-{
-  "model": "text-fast",
-  "systemPrompt": "Bạn là trợ lý viết nội dung bán hàng.",
-  "prompt": "Viết mô tả sản phẩm áo thun nam cotton."
-}
-```
-
-Các service caller không cần biết token, account, đối tác, endpoint, body JSON hay response JSON của từng nhà cung cấp AI. AI Gateway chịu trách nhiệm chọn route, gọi provider, fallback, ghi metric và expose dashboard.
-
-## Stack
-
-- ASP.NET Core Web API `.NET 8`
-- PostgreSQL làm database chính cho config, route, error events, metric aggregate
-- Redis làm runtime store cho rate limit, quota, cooldown, inflight, metric buffer
-- Dashboard HTML/CSS/JS thuần trong `wwwroot/dashboard`
-- Dapper + Npgsql cho database access
-- StackExchange.Redis cho Redis
-
-## Vì sao dùng cả PostgreSQL và Redis?
-
-PostgreSQL là nguồn dữ liệu chuẩn:
-
-- Client/service caller
-- Model alias nội bộ
-- Partner AI
-- Account/API key đã mã hóa
-- Model route
-- Error events trong 2 tháng
-- Error aggregate
-- Hourly metric aggregate
-
-Redis là runtime tốc độ cao:
-
-- Client rate limit bằng Lua atomic
-- Account quota bằng Lua atomic
-- Token quota reserve trước call và adjust lại theo actual usage nếu provider trả usage
-- Config cache cho client/model/route candidates để giảm DB read trên hot path
-- Cooldown khi gặp 429/quota
-- Inflight counter
-- Metric buffer trước khi flush xuống DB
-- Error event cap để tránh DB bị flood khi quota/rate-limit lỗi hàng loạt
-
-## Error events có cần lưu DB không?
-
-Có, nhưng chỉ lưu lỗi, không lưu toàn bộ request success.
-
-Lý do:
-
-- Khi account/provider lỗi, cần xem lại lỗi gần đây để debug.
-- Dashboard lỗi cần có lịch sử 2 tháng.
-- Error aggregate chỉ cho biết số lượng/lần cuối, còn error event giúp trace request cụ thể.
-- Không nên lưu prompt/response full để tránh rò dữ liệu nhạy cảm.
-
-Source này lưu:
-
-- `ai_error_aggregates`: tổng hợp lỗi theo client/model/partner/account/error type.
-- `ai_error_events`: từng lỗi gần đây, retention mặc định 62 ngày. Lỗi noisy như `rate_limit`/`quota_exceeded` được cap theo account/error/hour để không flood DB.
-
-## Quick start bằng Docker Compose
+## Quick start
 
 ```bash
-docker compose up --build
+# Build
+docker build -t aigateway:latest .
+
+# Run (mount a volume so data survives container restarts)
+docker run -d --name aigateway \
+  -p 8080:8080 \
+  -v aigateway-pg:/var/lib/postgresql/data \
+  -v aigateway-redis:/var/lib/redis \
+  aigateway:latest
 ```
 
-Nếu bạn đã chạy bản cũ trước đó và volume Postgres còn schema cũ, có 2 cách:
+Open <http://localhost:8080/>. Sign in with the bootstrap admin:
+
+| field    | default                    |
+|----------|----------------------------|
+| email    | `[email protected]`       |
+| password | `ChangeMe!2026`            |
+
+**Change this password immediately.** Override the defaults via env when starting the container:
 
 ```bash
-# Cách nhanh cho dev: reset volume
-docker compose down -v
-docker compose up --build
+docker run -d \
+  -e AiGateway__BootstrapAdminEmail="[email protected]" \
+  -e AiGateway__BootstrapAdminPassword="<strong password>" \
+  -p 8080:8080 \
+  -v aigateway-pg:/var/lib/postgresql/data \
+  -v aigateway-redis:/var/lib/redis \
+  aigateway:latest
 ```
 
-Hoặc chạy migration nâng cấp thủ công:
+For convenience, a `docker-compose.yml` is included that wraps these steps.
 
-```bash
-psql < migrations/002_upgrade_from_previous_mvp.sql
+## What's inside the image
+
+| process    | runs as   | priority |
+|------------|-----------|----------|
+| Postgres 15 | `postgres` | 10 |
+| Redis 7     | `redis`    | 20 |
+| .NET API    | `root`     | 30 |
+
+`supervisord` keeps all three alive; `tini` is PID 1 for clean signal handling.
+
+The first container start runs `initdb`, creates the `ai_gateway` user and database, then locks Postgres down to loopback-only access (`pg_hba.conf` allows only `127.0.0.1`).
+
+## Multi-tenant model
+
+```
+┌────────────┐      ┌──────────────┐      ┌────────────────────┐
+│  user A    │─────▶│ JWT or PAT   │─────▶│ Gateway picks      │
+│  user B    │      │ identifies   │      │ candidate routes   │
+│  user C    │      │ the tenant   │      │ from THIS user's   │
+└────────────┘      └──────────────┘      │ saved API keys     │
+                                          └────────────────────┘
 ```
 
-Sau khi chạy:
+* Sign-in returns a JWT (`Authorization: Bearer <jwt>`).
+* For backend integrations, mint a **Personal Access Token** under *Access Tokens*. PATs use the same `Authorization: Bearer aigw_…` header.
+* Every user manages their own pool of provider API keys under *My Keys*. Keys are stored AES-256-GCM encrypted; only the SHA-256 fingerprint is shown after save.
+* When `/v1/ai/generate` is called, the gateway selects from **only** the calling user's active keys.
 
-```txt
-API:       http://localhost:8080
-Dashboard: http://localhost:8080/dashboard/index.html
-Postgres:  localhost:5432
-Redis:     localhost:6379
-```
+## Health checks
 
-Health check:
+* A background worker pings every active key every `HealthCheckIntervalMinutes` (default 5) using each partner's cheapest `health_check_model`.
+* Per-key status, last error, and latency surface in *My Keys*.
+* Manual checks: click *Check* on a row, or `POST /v1/me/keys/{id}/health-check`.
 
-```bash
-curl http://localhost:8080/health
-curl -H "X-Admin-Key: change-me-admin-key" http://localhost:8080/v1/debug/db/ping
-curl -H "X-Admin-Key: change-me-admin-key" http://localhost:8080/v1/debug/redis/ping
-```
+## API surface
 
-Admin/dashboard/debug endpoints mặc định được bảo vệ bằng admin key. Docker compose dùng key dev:
+| method  | path                                  | auth      | purpose                                              |
+|---------|---------------------------------------|-----------|------------------------------------------------------|
+| POST    | `/v1/auth/register`                   | none      | Self-serve signup                                    |
+| POST    | `/v1/auth/login`                      | none      | Returns JWT + user profile                           |
+| GET     | `/v1/me`                              | JWT / PAT | Current profile                                      |
+| GET/POST/DELETE | `/v1/me/tokens`               | JWT       | Manage personal access tokens                        |
+| GET/POST/PUT/DELETE | `/v1/me/keys`             | JWT       | CRUD your provider API keys                          |
+| POST    | `/v1/me/keys/{id}/health-check`       | JWT       | Run a one-off health probe                           |
+| GET     | `/v1/me/keys/health`                  | JWT       | Live status of all keys (inflight + cooldown)        |
+| GET     | `/v1/me/dashboard/overview`           | JWT       | Aggregated metrics                                   |
+| GET     | `/v1/me/dashboard/{models|partners|account-keys}` | JWT | Grouped breakdowns                          |
+| GET     | `/v1/me/dashboard/errors`             | JWT       | Recent errors                                        |
+| POST    | `/v1/ai/generate`                     | JWT / PAT | Send a generation request                            |
+| ...     | `/v1/admin/...`                       | admin     | Partner / model / route configuration                |
+| GET     | `/health`, `/health/ready`            | none      | Liveness / readiness probes                          |
 
-```txt
-change-me-admin-key
-```
+## Bug fixes vs v1
 
-Dashboard: mở `http://localhost:8080/dashboard/index.html`, nhập key trên khi trình duyệt hỏi. Production phải đổi `AdminAuth__ApiKeyHash`.
+These were the hard bugs from the MVP audit, all fixed here:
 
-## Tạo config mẫu
+1. **Token-usage adjustment after key expiry**: Lua now checks `EXISTS` before `INCRBY`, uses `KEEPTTL`, and clamps at 0 — no more persistent negative-value keys that break quota for the whole bucket.
+2. **Inflight DECR**: same `EXISTS`+`KEEPTTL`+clamp pattern; load-balancing scores stay accurate after long-running requests.
+3. **MigrationRunner re-runs all SQL on every start**: now tracked in `__schema_migrations` with SHA-256 checksums.
+4. **Hardcoded `your-org` OpenRouter referer**: bound to `OpenRouterOptions` (`AppReferer`, `AppTitle`).
+5. **No request validation**: every contract uses `DataAnnotations`; `[ApiController]` returns 400s automatically.
+6. **Vietnamese / UTF-8 token under-estimation**: `TokenEstimator` uses `max(chars/2, bytes/3.5)`.
+7. **Cache stampede**: `RedisConfigCache.GetOrSetAsync` uses per-key `SemaphoreSlim` to ensure single-flight loads.
+8. **Encrypted API keys cached in Redis**: removed. Per-user keys load from Postgres on demand (cheap with the join).
+9. **Metric flush re-flushes old buckets forever**: each bucket has a `_dirty` marker; cleared after flush, buckets older than 2h are pruned.
+10. **No correlation ID**: `CorrelationIdMiddleware` reads / generates `X-Request-Id` and adds a log scope.
+11. **No body size limit**: Kestrel `MaxRequestBodySize` set from `AiGateway:MaxRequestBodyBytes` (default 1 MB).
 
-Tạo model:
+## Adding a new partner
 
-```bash
-curl -X POST http://localhost:8080/v1/admin/models \
-  -H "Content-Type: application/json" \
-  -H "X-Admin-Key: change-me-admin-key" \
-  -d '{
-    "code":"text-fast",
-    "name":"Fast Text Model",
-    "defaultTemperature":0.7,
-    "defaultMaxTokens":1000,
-    "maxRetry":3
-  }'
-```
+Adding a partner requires writing an adapter (consistent with what you asked for — partner integration stays in code):
 
-Tạo Gemini partner:
+1. Implement `IAiPartnerClient` (see `GeminiClient`, `OpenAiCompatibleClient`, `OpenRouterClient`).
+2. Register it in `Program.cs`:
+   ```csharp
+   builder.Services.AddSingleton<IAiPartnerClient, MyClient>();
+   ```
+3. Insert a row into `ai_partners` with the matching `adapter_code` — either via the admin UI or via SQL migration.
 
-```bash
-curl -X POST http://localhost:8080/v1/admin/partners \
-  -H "Content-Type: application/json" \
-  -H "X-Admin-Key: change-me-admin-key" \
-  -d '{
-    "code":"gemini",
-    "name":"Google Gemini",
-    "adapterCode":"gemini",
-    "baseUrl":"https://generativelanguage.googleapis.com",
-    "weight":100,
-    "qualityScore":85
-  }'
-```
+Users can then add their personal API key for that partner under *My Keys*.
 
-Tạo Gemini account. API key sẽ được mã hóa bằng AES-GCM trước khi lưu DB:
+## Configuration reference
 
-```bash
-curl -X POST http://localhost:8080/v1/admin/partners/gemini/accounts \
-  -H "Content-Type: application/json" \
-  -H "X-Admin-Key: change-me-admin-key" \
-  -d '{
-    "code":"gemini_acc_01",
-    "name":"Gemini Account 01",
-    "apiKey":"REPLACE_WITH_REAL_KEY",
-    "rpmLimit":15,
-    "rpdLimit":1500,
-    "weight":100
-  }'
-```
+All keys live under the `AiGateway` section (override via `AiGateway__<Key>` env var).
 
-Tạo route model -> partner:
+| key                                | default              | meaning                                              |
+|------------------------------------|----------------------|------------------------------------------------------|
+| `EncryptionKeyBase64`              | auto-generated       | AES-256 key for user API key at-rest encryption      |
+| `BootstrapAdminEmail/Password`     | admin defaults       | Created only when the users table is empty           |
+| `MetricFlushSeconds`               | 30                   | Redis → Postgres metric flush cadence                |
+| `ErrorEventsRetentionDays`         | 62                   | `ai_error_events` retention                          |
+| `ConfigCacheSeconds`               | 60                   | Redis config-cache TTL                               |
+| `ErrorEventsMaxPerKeyTypeHour`     | 20                   | Cap raw event inserts per (key, type, hour)          |
+| `DefaultReservedOutputTokens`      | 1000                 | Output token reservation when client omits           |
+| `MaxRequestBodyBytes`              | 1 048 576            | Kestrel body size cap                                |
+| `HealthCheckIntervalMinutes`       | 5                    | Background sweep cadence                             |
+| `HealthCheckTimeoutMs`             | 10 000               | Per-key health probe timeout                         |
 
-```bash
-curl -X POST http://localhost:8080/v1/admin/models/text-fast/routes \
-  -H "Content-Type: application/json" \
-  -H "X-Admin-Key: change-me-admin-key" \
-  -d '{
-    "partnerCode":"gemini",
-    "routeCode":"default",
-    "providerModel":"gemini-1.5-flash",
-    "timeoutMs":30000,
-    "weight":100
-  }'
-```
-
-Gọi AI:
-
-```bash
-curl -X POST http://localhost:8080/v1/ai/generate \
-  -H "Content-Type: application/json" \
-  -H "X-AI-Client: product-service" \
-  -d '{
-    "model":"text-fast",
-    "systemPrompt":"Bạn là trợ lý viết nội dung bán hàng.",
-    "prompt":"Viết mô tả sản phẩm áo thun nam cotton, phong cách trẻ trung.",
-    "debug":true,
-    "clientCode":"product-service",
-    "featureCode":"product_description"
-  }'
-```
-
-## Các endpoint chính
-
-AI:
-
-```txt
-POST /v1/ai/generate
-```
-
-Admin config:
-
-```txt
-GET  /v1/admin/clients
-POST /v1/admin/clients
-PATCH /v1/admin/clients/{clientCode}/status
-
-GET  /v1/admin/models
-POST /v1/admin/models
-PATCH /v1/admin/models/{modelCode}/status
-
-GET  /v1/admin/partners
-POST /v1/admin/partners
-PATCH /v1/admin/partners/{partnerCode}/status
-
-GET  /v1/admin/partners/{partnerCode}/accounts
-POST /v1/admin/partners/{partnerCode}/accounts
-PATCH /v1/admin/accounts/{accountCode}/status
-
-GET  /v1/admin/models/{modelCode}/routes
-POST /v1/admin/models/{modelCode}/routes
-```
-
-Dashboard:
-
-```txt
-GET /v1/dashboard/overview
-GET /v1/dashboard/models
-GET /v1/dashboard/partners
-GET /v1/dashboard/accounts
-GET /v1/dashboard/clients
-GET /v1/dashboard/errors
-GET /v1/dashboard/health
-```
-
-Debug:
-
-```txt
-GET /health
-GET /v1/debug/db/ping
-GET /v1/debug/redis/ping
-```
-
-## Ghi chú bảo mật
-
-- Không lưu raw API key trong DB.
-- `api_key_enc` được mã hóa bằng AES-256-GCM.
-- Thay `AiGateway__EncryptionKeyBase64` trong production bằng key thật 32 bytes base64.
-- `/v1/admin/*`, `/v1/dashboard/*`, `/v1/debug/*` được bảo vệ bằng `X-Admin-Key` hoặc `Authorization: Bearer`.
-- Mặc định `AiGateway__RequireClientAuth=false` để demo dễ. Production nên bật `true`.
-- Không log full prompt/response mặc định.
-
-## Cấu trúc repo
-
-```txt
-src/AiGateway.Api/
-  Controllers/             API controllers
-  Contracts/               DTO request/response
-  Domain/                  Config model nội bộ
-  Application/             Service chính, route selector, client auth
-  Infrastructure/Database/ PostgreSQL repositories
-  Infrastructure/Redis/    Redis runtime stores
-  Infrastructure/Partners/ Provider clients/adapters
-  Infrastructure/Security/ Secret encryption
-  Workers/                 Metric flush, cleanup
-  wwwroot/dashboard/       HTML/CSS/JS dashboard
-
-migrations/001_init.sql    PostgreSQL schema
-examples/                  Seed SQL và HTTP examples
-docs/                      Tài liệu chi tiết
-Dockerfile
-docker-compose.yml
-```
-
-## Trạng thái source
-
-Repo này là bản MVP đã được nâng cấp sau review production-risk:
-
-- Admin/dashboard/debug auth.
-- Redis Lua atomic quota/rate-limit.
-- Redis config cache cho hot path.
-- Token quota reserve + actual usage adjustment.
-- Error events có cap.
-- `routeCode` cho nhiều route cùng model + partner.
-
-Môi trường tạo artifact hiện tại không có .NET SDK nên chưa build được trực tiếp tại đây. Source được thiết kế để build bằng Dockerfile hoặc máy có .NET 8 SDK.
+The `Jwt__SecretBase64` and `AiGateway__EncryptionKeyBase64` are generated on first run and persisted under `${PGDATA}/.aigateway.*` so they survive container restarts.

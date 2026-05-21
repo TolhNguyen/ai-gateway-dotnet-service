@@ -1,43 +1,45 @@
-using AiGateway.Api.Application;
+using AiGateway.Api.Application.AI;
 using AiGateway.Api.Contracts;
+using AiGateway.Api.Infrastructure.Security;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace AiGateway.Api.Controllers;
 
 [ApiController]
 [Route("v1/ai")]
+[Authorize]
 public sealed class AiGenerateController : ControllerBase
 {
     private readonly AiGatewayService _service;
+    private readonly ICurrentUser _current;
 
-    public AiGenerateController(AiGatewayService service)
+    public AiGenerateController(AiGatewayService service, ICurrentUser current)
     {
         _service = service;
+        _current = current;
     }
 
     [HttpPost("generate")]
-    public async Task<ActionResult<GenerateAiResponse>> Generate(
-        [FromBody] GenerateAiRequest request,
-        CancellationToken cancellationToken)
+    public async Task<IActionResult> Generate([FromBody] GenerateAiRequest req, CancellationToken ct)
     {
-        var clientCode = Request.Headers.TryGetValue("X-AI-Client", out var c) ? c.ToString() : null;
-        var apiKey = Request.Headers.TryGetValue("X-AI-Key", out var k) ? k.ToString() : null;
+        if (_current.UserId is not long uid) return Unauthorized();
 
-        var result = await _service.GenerateAsync(request, clientCode, apiKey, cancellationToken);
+        var resp = await _service.GenerateAsync(uid, req, HttpContext, ct);
 
-        if (!result.Success)
+        if (!resp.Success)
         {
-            var status = result.ErrorType switch
+            var status = resp.ErrorType switch
             {
-                "auth_error" => 401,
-                "validation_error" => 400,
-                "model_not_found" => 404,
-                _ => 502
+                "permission_error" => StatusCodes.Status403Forbidden,
+                "auth_error"       => StatusCodes.Status401Unauthorized,
+                "rate_limit"       => StatusCodes.Status429TooManyRequests,
+                "quota_exceeded"   => StatusCodes.Status429TooManyRequests,
+                "timeout"          => StatusCodes.Status504GatewayTimeout,
+                _                  => StatusCodes.Status502BadGateway
             };
-
-            return StatusCode(status, result);
+            return StatusCode(status, resp);
         }
-
-        return Ok(result);
+        return Ok(resp);
     }
 }

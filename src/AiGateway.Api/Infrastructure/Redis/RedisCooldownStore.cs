@@ -22,68 +22,37 @@ public sealed class RedisCooldownStore
     public async Task<bool> IsPartnerCooldownAsync(string partnerCode)
         => await _db.KeyExistsAsync(RedisKeys.CooldownPartner(partnerCode));
 
-    public async Task<bool> IsAccountCooldownAsync(string accountCode)
-        => await _db.KeyExistsAsync(RedisKeys.CooldownAccount(accountCode));
+    public async Task<bool> IsAccountKeyCooldownAsync(long keyId)
+        => await _db.KeyExistsAsync(RedisKeys.CooldownAccountKey(keyId));
 
-    public async Task<bool> IsAccountModelCooldownAsync(string accountCode, string modelCode)
-        => await _db.KeyExistsAsync(RedisKeys.CooldownAccountModel(accountCode, modelCode));
+    public async Task<bool> IsAccountKeyModelCooldownAsync(long keyId, string modelCode)
+        => await _db.KeyExistsAsync(RedisKeys.CooldownAccountKeyModel(keyId, modelCode));
 
-    public async Task<bool> IsBlockedAsync(string partnerCode, string accountCode, string modelCode)
+    public async Task<bool> IsBlockedAsync(string partnerCode, long keyId, string modelCode)
+        => await IsPartnerCooldownAsync(partnerCode)
+        || await IsAccountKeyCooldownAsync(keyId)
+        || await IsAccountKeyModelCooldownAsync(keyId, modelCode);
+
+    public async Task SetAccountKeyModelCooldownAsync(
+        long keyId, string modelCode, string errorType, string? reason, TimeSpan ttl)
     {
-        if (await IsPartnerCooldownAsync(partnerCode)) return true;
-        if (await IsAccountCooldownAsync(accountCode)) return true;
-        if (await IsAccountModelCooldownAsync(accountCode, modelCode)) return true;
-        return false;
-    }
-
-    public async Task SetAccountModelCooldownAsync(
-        string accountCode,
-        string modelCode,
-        string errorType,
-        string? reason,
-        TimeSpan ttl)
-    {
-        var value = JsonSerializer.Serialize(new CooldownInfo
+        var json = JsonSerializer.Serialize(new CooldownInfo
         {
-            Reason = reason,
-            ErrorType = errorType,
-            CreatedAt = DateTimeOffset.UtcNow
+            Reason = reason, ErrorType = errorType, CreatedAt = DateTimeOffset.UtcNow
         });
 
         var batch = _db.CreateBatch();
-        _ = batch.StringSetAsync(RedisKeys.CooldownAccountModel(accountCode, modelCode), value, ttl);
-        _ = batch.StringSetAsync(RedisKeys.CooldownAccount(accountCode), value, ttl);
+        _ = batch.StringSetAsync(RedisKeys.CooldownAccountKeyModel(keyId, modelCode), json, ttl);
+        _ = batch.StringSetAsync(RedisKeys.CooldownAccountKey(keyId), json, ttl);
         batch.Execute();
         await Task.CompletedTask;
     }
 
-    public async Task<CooldownInfo?> GetAccountCooldownAsync(string accountCode)
+    public async Task<CooldownInfo?> GetAccountKeyCooldownAsync(long keyId)
     {
-        var value = await _db.StringGetAsync(RedisKeys.CooldownAccount(accountCode));
-        if (!value.HasValue) return null;
-
-        try
-        {
-            return JsonSerializer.Deserialize<CooldownInfo>(value.ToString());
-        }
-        catch
-        {
-            return new CooldownInfo { Reason = value.ToString() };
-        }
-    }
-
-    public async Task<CooldownInfo?> GetAccountModelCooldownAsync(string accountCode, string modelCode)
-    {
-        var value = await _db.StringGetAsync(RedisKeys.CooldownAccountModel(accountCode, modelCode));
-        if (!value.HasValue) return null;
-
-        try
-        {
-            return JsonSerializer.Deserialize<CooldownInfo>(value.ToString());
-        }
-        catch
-        {
-            return new CooldownInfo { Reason = value.ToString() };
-        }
+        var v = await _db.StringGetAsync(RedisKeys.CooldownAccountKey(keyId));
+        if (!v.HasValue) return null;
+        try { return JsonSerializer.Deserialize<CooldownInfo>(v.ToString()!); }
+        catch { return new CooldownInfo { Reason = v.ToString() }; }
     }
 }

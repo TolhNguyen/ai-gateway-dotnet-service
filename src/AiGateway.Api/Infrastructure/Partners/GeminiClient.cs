@@ -1,7 +1,6 @@
 using System.Net;
 using System.Text;
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using AiGateway.Api.Contracts;
 
 namespace AiGateway.Api.Infrastructure.Partners;
@@ -10,301 +9,119 @@ public sealed class GeminiClient : IAiPartnerClient
 {
     public string AdapterCode => "gemini";
 
-    private readonly IHttpClientFactory _httpClientFactory;
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
-    {
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
-    };
+    private readonly IHttpClientFactory _httpFactory;
+    private readonly ILogger<GeminiClient> _logger;
 
-    public GeminiClient(IHttpClientFactory httpClientFactory)
+    public GeminiClient(IHttpClientFactory factory, ILogger<GeminiClient> logger)
     {
-        _httpClientFactory = httpClientFactory;
+        _httpFactory = factory;
+        _logger = logger;
     }
 
     public async Task<PartnerGenerateResult> GenerateAsync(
-        PartnerCallContext context,
-        PartnerGenerateRequest request,
-        CancellationToken cancellationToken)
-    {
-        var httpClient = _httpClientFactory.CreateClient("ai-partners");
-        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeoutCts.CancelAfter(TimeSpan.FromMilliseconds(context.TimeoutMs));
-
-        var url = $"{context.BaseUrl.TrimEnd('/')}/v1beta/models/{context.ProviderModel}:generateContent?key={Uri.EscapeDataString(context.ApiKey)}";
-
-        var systemPrompt = string.Join("\n", request.Messages
-            .Where(x => string.Equals(x.Role, "system", StringComparison.OrdinalIgnoreCase))
-            .Select(x => x.Content));
-
-        var contents = request.Messages
-            .Where(x => !string.Equals(x.Role, "system", StringComparison.OrdinalIgnoreCase))
-            .Select(x => new
-            {
-                role = string.Equals(x.Role, "assistant", StringComparison.OrdinalIgnoreCase) ? "model" : "user",
-                parts = new[] { new { text = x.Content } }
-            })
-            .ToArray();
-
-        var body = new
-        {
-            systemInstruction = string.IsNullOrWhiteSpace(systemPrompt)
-                ? null
-                : new { parts = new[] { new { text = systemPrompt } } },
-            contents,
-            generationConfig = new
-            {
-                temperature = request.Temperature,
-                maxOutputTokens = request.MaxTokens
-            }
-        };
-
-        using var httpRequest = new HttpRequestMessage(HttpMethod.Post, url);
-        httpRequest.Content = new StringContent(JsonSerializer.Serialize(body, JsonOptions), Encoding.UTF8, "application/json");
-
-        try
-        {
-            using var response = await httpClient.SendAsync(httpRequest, timeoutCts.Token);
-            var raw = await response.Content.ReadAsStringAsync(timeoutCts.Token);
-
-            if (!response.IsSuccessStatusCode)
-            {
-                return ParseError(raw, (int)response.StatusCode, response.Headers.RetryAfter?.Delta);
-            }
-
-            return ParseSuccess(raw);
-        }
-        catch (TaskCanceledException ex) when (!cancellationToken.IsCancellationRequested)
-        {
-            return new PartnerGenerateResult
-            {
-                Success = false,
-                ErrorType = "timeout",
-                ErrorMessage = ex.Message,
-                Retryable = true
-            };
-        }
-        catch (Exception ex)
-        {
-            return new PartnerGenerateResult
-            {
-                Success = false,
-                ErrorType = "unknown",
-                ErrorMessage = ex.Message,
-                Retryable = false
-            };
-        }
-    }
-
-    private static PartnerGenerateResult ParseSuccess(string raw)
+        PartnerCallContext ctx, PartnerGenerateRequest req, CancellationToken ct)
     {
         try
         {
+            var http = _httpFactory.CreateClient(AdapterCode);
+            http.Timeout = TimeSpan.FromMilliseconds(ctx.TimeoutMs);
+
+            var url = $"{ctx.BaseUrl.TrimEnd('/')}/v1beta/models/{Uri.EscapeDataString(ctx.ProviderModel)}:generateContent?key={Uri.EscapeDataString(ctx.ApiKey)}";
+
+            var bodyObj = new
+            {
+                contents = new[]
+                {
+                    new { role = "user", parts = new[] { new { text = req.Prompt } } }
+                },
+                systemInstruction = string.IsNullOrEmpty(req.SystemPrompt) ? null : new
+                {
+                    parts = new[] { new { text = req.SystemPrompt } }
+                },
+                generationConfig = new
+                {
+                    temperature = (double)req.Temperature,
+                    maxOutputTokens = req.MaxTokens
+                }
+            };
+
+            using var content = new StringContent(JsonSerializer.Serialize(bodyObj), Encoding.UTF8, "application/json");
+            using var resp = await http.PostAsync(url, content, ct);
+            var raw = await resp.Content.ReadAsStringAsync(ct);
+
+            if (!resp.IsSuccessStatusCode)
+                return MapError(resp.StatusCode, raw);
+
             using var doc = JsonDocument.Parse(raw);
             var root = doc.RootElement;
-            var parts = new List<string>();
 
-            if (root.TryGetProperty("candidates", out var candidates) &&
-                candidates.ValueKind == JsonValueKind.Array &&
-                candidates.GetArrayLength() > 0)
+            string? text = null;
+            if (root.TryGetProperty("candidates", out var candidates) && candidates.GetArrayLength() > 0)
             {
-                var first = candidates[0];
-                if (first.TryGetProperty("content", out var content) &&
-                    content.TryGetProperty("parts", out var partNodes) &&
-                    partNodes.ValueKind == JsonValueKind.Array)
+                var cand = candidates[0];
+                if (cand.TryGetProperty("content", out var contentEl) &&
+                    contentEl.TryGetProperty("parts", out var parts) && parts.GetArrayLength() > 0 &&
+                    parts[0].TryGetProperty("text", out var txt))
                 {
-                    foreach (var part in partNodes.EnumerateArray())
-                    {
-                        if (part.TryGetProperty("text", out var textNode))
-                        {
-                            var text = textNode.GetString();
-                            if (!string.IsNullOrWhiteSpace(text)) parts.Add(text);
-                        }
-                    }
+                    text = txt.GetString();
                 }
             }
 
-            var contentText = string.Join("\n", parts);
-            if (string.IsNullOrWhiteSpace(contentText))
+            int? inT = null, outT = null, totT = null;
+            if (root.TryGetProperty("usageMetadata", out var usage))
             {
-                return new PartnerGenerateResult
-                {
-                    Success = false,
-                    ErrorType = "bad_response",
-                    ErrorMessage = "Gemini response missing candidates[0].content.parts.text",
-                    Retryable = true,
-                    Raw = raw
-                };
+                if (usage.TryGetProperty("promptTokenCount", out var p))     inT = p.GetInt32();
+                if (usage.TryGetProperty("candidatesTokenCount", out var c)) outT = c.GetInt32();
+                if (usage.TryGetProperty("totalTokenCount", out var t))      totT = t.GetInt32();
             }
 
-            AiUsageDto? usage = null;
-            if (root.TryGetProperty("usageMetadata", out var usageNode))
-            {
-                usage = new AiUsageDto
-                {
-                    InputTokens = GetInt(usageNode, "promptTokenCount"),
-                    OutputTokens = GetInt(usageNode, "candidatesTokenCount"),
-                    TotalTokens = GetInt(usageNode, "totalTokenCount")
-                };
-            }
+            if (string.IsNullOrEmpty(text))
+                return new PartnerGenerateResult { Success = false, ErrorType = "bad_response", ErrorMessage = "empty candidates" };
 
             return new PartnerGenerateResult
             {
                 Success = true,
-                Content = contentText,
-                Usage = usage,
-                Raw = JsonSerializer.Deserialize<object>(raw, JsonOptions)
+                Content = text,
+                Usage = new AiUsageDto { InputTokens = inT, OutputTokens = outT, TotalTokens = totT }
             };
+        }
+        catch (TaskCanceledException) when (!ct.IsCancellationRequested)
+        {
+            return new PartnerGenerateResult { Success = false, ErrorType = "timeout", ErrorMessage = "Gemini request timed out." };
         }
         catch (Exception ex)
         {
-            return new PartnerGenerateResult
-            {
-                Success = false,
-                ErrorType = "bad_response",
-                ErrorMessage = ex.Message,
-                Retryable = true,
-                Raw = raw
-            };
+            _logger.LogWarning(ex, "Gemini call failed");
+            return new PartnerGenerateResult { Success = false, ErrorType = "unknown", ErrorMessage = ex.Message };
         }
     }
 
-    private static PartnerGenerateResult ParseError(string raw, int status, TimeSpan? retryAfter)
+    private static PartnerGenerateResult MapError(HttpStatusCode status, string body)
     {
-        var info = ExtractErrorInfo(raw);
-        var message = info.Message;
-        var lower = message.ToLowerInvariant();
-        var externalStatus = info.Status?.ToUpperInvariant();
-
-        if (status == (int)HttpStatusCode.TooManyRequests ||
-            externalStatus == "RESOURCE_EXHAUSTED" ||
-            lower.Contains("quota") ||
-            lower.Contains("rate limit") ||
-            lower.Contains("resource exhausted"))
+        var (type, message) = status switch
         {
-            var scope = DetectScope(message);
-            return new PartnerGenerateResult
-            {
-                Success = false,
-                HttpStatus = status,
-                ErrorType = lower.Contains("rate limit") ? "rate_limit" : "quota_exceeded",
-                ErrorCode = info.Code ?? info.Status,
-                ErrorMessage = message,
-                Retryable = true,
-                RetryAfterSeconds = RetryAfterSeconds(retryAfter),
-                LimitScope = scope,
-                SuggestedCooldownSeconds = SuggestedCooldownSeconds(scope, retryAfter),
-                Raw = raw
-            };
-        }
-
-        if (status >= 500)
-        {
-            return new PartnerGenerateResult
-            {
-                Success = false,
-                HttpStatus = status,
-                ErrorType = "server_error",
-                ErrorCode = info.Code ?? info.Status,
-                ErrorMessage = message,
-                Retryable = true,
-                Raw = raw
-            };
-        }
-
-        if (status == 401)
-        {
-            return new PartnerGenerateResult
-            {
-                Success = false,
-                HttpStatus = status,
-                ErrorType = "auth_error",
-                ErrorCode = info.Code ?? info.Status,
-                ErrorMessage = message,
-                Retryable = false,
-                Raw = raw
-            };
-        }
-
-        if (status == 403)
-        {
-            return new PartnerGenerateResult
-            {
-                Success = false,
-                HttpStatus = status,
-                ErrorType = "permission_error",
-                ErrorCode = info.Code ?? info.Status,
-                ErrorMessage = message,
-                Retryable = false,
-                Raw = raw
-            };
-        }
-
-        return new PartnerGenerateResult
-        {
-            Success = false,
-            HttpStatus = status,
-            ErrorType = "provider_error",
-            ErrorCode = info.Code ?? info.Status,
-            ErrorMessage = message,
-            Retryable = false,
-            Raw = raw
+            HttpStatusCode.TooManyRequests   => ("rate_limit",        TruncateError(body)),
+            HttpStatusCode.RequestTimeout    => ("timeout",           "request timeout"),
+            HttpStatusCode.Unauthorized      => ("auth_error",        TruncateError(body)),
+            HttpStatusCode.Forbidden         => ("permission_error",  TruncateError(body)),
+            HttpStatusCode.BadRequest        => DetectQuota(body),
+            HttpStatusCode.InternalServerError or
+            HttpStatusCode.BadGateway or
+            HttpStatusCode.ServiceUnavailable or
+            HttpStatusCode.GatewayTimeout    => ("server_error", TruncateError(body)),
+            _ => ("unknown", TruncateError(body))
         };
+        return new PartnerGenerateResult { Success = false, ErrorType = type, ErrorMessage = message, HttpStatus = (int)status };
     }
 
-    private static ErrorInfo ExtractErrorInfo(string raw)
+    private static (string, string) DetectQuota(string body)
     {
-        if (string.IsNullOrWhiteSpace(raw)) return new ErrorInfo(string.Empty, null, null);
-
-        try
-        {
-            using var doc = JsonDocument.Parse(raw);
-            var root = doc.RootElement;
-            if (root.TryGetProperty("error", out var error))
-            {
-                var message = error.TryGetProperty("message", out var msg) ? msg.GetString() : null;
-                var status = error.TryGetProperty("status", out var statusNode) ? statusNode.GetString() : null;
-                var code = error.TryGetProperty("code", out var codeNode) ? codeNode.ToString() : null;
-                return new ErrorInfo(message ?? status ?? raw, status, code);
-            }
-
-            if (root.TryGetProperty("message", out var rootMsg)) return new ErrorInfo(rootMsg.GetString() ?? raw, null, null);
-            return new ErrorInfo(raw, null, null);
-        }
-        catch
-        {
-            return new ErrorInfo(raw, null, null);
-        }
+        if (body.Contains("RESOURCE_EXHAUSTED", StringComparison.OrdinalIgnoreCase) ||
+            body.Contains("quota", StringComparison.OrdinalIgnoreCase))
+            return ("quota_exceeded", TruncateError(body));
+        return ("bad_response", TruncateError(body));
     }
 
-    private static string DetectScope(string message)
-    {
-        var lower = message.ToLowerInvariant();
-        if (lower.Contains("minute") || lower.Contains("rpm")) return "rpm";
-        if (lower.Contains("token") || lower.Contains("tpm")) return "tpm";
-        if (lower.Contains("daily") || lower.Contains("per day") || lower.Contains("day")) return "daily";
-        if (lower.Contains("monthly") || lower.Contains("month")) return "monthly";
-        return "unknown";
-    }
-
-    private static int? RetryAfterSeconds(TimeSpan? retryAfter)
-        => retryAfter.HasValue ? Math.Max(1, Convert.ToInt32(Math.Ceiling(retryAfter.Value.TotalSeconds))) : null;
-
-    private static int SuggestedCooldownSeconds(string scope, TimeSpan? retryAfter)
-    {
-        var retry = RetryAfterSeconds(retryAfter);
-        if (retry is > 0) return retry.Value;
-
-        return scope switch
-        {
-            "rpm" or "tpm" => 60,
-            "daily" => 86400,
-            "monthly" => 604800,
-            _ => 300
-        };
-    }
-
-    private static int? GetInt(JsonElement element, string name)
-        => element.TryGetProperty(name, out var node) && node.TryGetInt32(out var value) ? value : null;
-
-    private sealed record ErrorInfo(string Message, string? Status, string? Code);
+    private static string TruncateError(string body)
+        => body.Length > 500 ? body[..500] : body;
 }

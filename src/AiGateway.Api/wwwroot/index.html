@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AI Gateway</title>
+<link rel="stylesheet" href="/app/style.css" />
+</head>
+<body>
+  <main class="auth">
+    <section class="card">
+      <header>
+        <div class="logomark">▲</div>
+        <h1>AI Gateway</h1>
+        <p class="muted">Single-image multi-provider AI proxy</p>
+      </header>
+
+      <div id="tabs" class="tabs">
+        <button data-tab="login" class="active">Sign in</button>
+        <button data-tab="register">Create account</button>
+      </div>
+
+      <form id="formLogin" class="tab-panel active">
+        <label>Email <input type="email" name="email" required autocomplete="email" /></label>
+        <label>Password <input type="password" name="password" required autocomplete="current-password" /></label>
+        <button type="submit">Sign in</button>
+        <p id="loginErr" class="error"></p>
+      </form>
+
+      <form id="formRegister" class="tab-panel">
+        <label>Email <input type="email" name="email" required /></label>
+        <label>Display name <input type="text" name="displayName" /></label>
+        <label>Password <input type="password" name="password" required minlength="8" /></label>
+        <button type="submit">Create account</button>
+        <p id="registerErr" class="error"></p>
+      </form>
+
+      <p class="footnote">
+        First-run admin: see container logs for the bootstrap email.
+      </p>
+    </section>
+  </main>
+
+<script>
+const $ = (s, r=document) => r.querySelector(s);
+const $$ = (s, r=document) => [...r.querySelectorAll(s)];
+
+$$('#tabs button').forEach(b => b.onclick = () => {
+    $$('#tabs button').forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+    $$('.tab-panel').forEach(p => p.classList.remove('active'));
+    $('#form' + b.dataset.tab[0].toUpperCase() + b.dataset.tab.slice(1)).classList.add('active');
+});
+
+$('#formLogin').onsubmit = async e => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    $('#loginErr').textContent = '';
+    try {
+        const r = await fetch('/v1/auth/login', {
+            method: 'POST', headers: {'content-type': 'application/json'},
+            body: JSON.stringify({email: f.get('email'), password: f.get('password')})
+        });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error || 'Login failed');
+        sessionStorage.setItem('ai_gw_token', data.accessToken);
+        sessionStorage.setItem('ai_gw_user', JSON.stringify(data.user));
+        location.href = '/app/';
+    } catch (err) {
+        $('#loginErr').textContent = err.message;
+    }
+};
+
+$('#formRegister').onsubmit = async e => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    $('#registerErr').textContent = '';
+    try {
+        const r = await fetch('/v1/auth/register', {
+            method: 'POST', headers: {'content-type': 'application/json'},
+            body: JSON.stringify({
+                email: f.get('email'),
+                password: f.get('password'),
+                displayName: f.get('displayName') || null
+            })
+        });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error || 'Registration failed');
+        // Auto sign-in
+        const lr = await fetch('/v1/auth/login', {
+            method: 'POST', headers: {'content-type':'application/json'},
+            body: JSON.stringify({email: f.get('email'), password: f.get('password')})
+        });
+        const ld = await lr.json();
+        sessionStorage.setItem('ai_gw_token', ld.accessToken);
+        sessionStorage.setItem('ai_gw_user', JSON.stringify(ld.user));
+        location.href = '/app/';
+    } catch (err) {
+        $('#registerErr').textContent = err.message;
+    }
+};
+</script>
+</body>
+</html>

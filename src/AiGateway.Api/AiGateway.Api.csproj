@@ -1,16 +1,18 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>net9.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <InvariantGlobalization>false</InvariantGlobalization>
+    <RootNamespace>AiGateway.Api</RootNamespace>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Dapper" Version="2.1.66" />
-    <PackageReference Include="Npgsql" Version="8.0.6" />
-    <PackageReference Include="StackExchange.Redis" Version="2.12.14" />
+    <PackageReference Include="BCrypt.Net-Next"                           Version="4.0.3" />
+    <PackageReference Include="Dapper"                                    Version="2.1.66" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="9.0.0" />
+    <PackageReference Include="Npgsql"                                    Version="9.0.2" />
+    <PackageReference Include="StackExchange.Redis"                       Version="2.8.16" />
+    <PackageReference Include="System.IdentityModel.Tokens.Jwt"           Version="8.2.1" />
   </ItemGroup>
 </Project>
-
-

@@ -1,3 +1,5 @@
+using System.ComponentModel.DataAnnotations;
+
 namespace AiGateway.Api.Contracts;
 
 public sealed record AiMessageDto
@@ -8,15 +10,29 @@ public sealed record AiMessageDto
 
 public sealed record GenerateAiRequest
 {
+    [Required, StringLength(100, MinimumLength = 1)]
     public required string Model { get; init; }
+
+    [StringLength(50_000)]
     public string? SystemPrompt { get; init; }
+
+    [Required, StringLength(200_000, MinimumLength = 1)]
     public required string Prompt { get; init; }
+
+    [Range(typeof(decimal), "0.0", "2.0")]
     public decimal? Temperature { get; init; }
+
+    [Range(1, 32_000)]
     public int? MaxTokens { get; init; }
+
+    [StringLength(100)]
     public string? RequestId { get; init; }
-    public string? ClientCode { get; init; }
+
+    [StringLength(100)]
     public string? FeatureCode { get; init; }
-    public bool Debug { get; init; } = false;
+
+    public bool Debug { get; init; }
+
     public Dictionary<string, object?> Metadata { get; init; } = new();
 }
 
@@ -30,7 +46,7 @@ public sealed record AiUsageDto
 public sealed record AiRoutingDto
 {
     public string? PartnerCode { get; init; }
-    public string? AccountCode { get; init; }
+    public string? AccountKeyCode { get; init; }
     public string? RouteCode { get; init; }
     public string? ProviderModel { get; init; }
     public bool FallbackUsed { get; init; }
@@ -40,7 +56,7 @@ public sealed record AiRoutingDto
 public sealed record AiAttemptErrorDto
 {
     public required string PartnerCode { get; init; }
-    public required string AccountCode { get; init; }
+    public required string AccountKeyCode { get; init; }
     public string? ErrorType { get; init; }
     public string? ErrorMessage { get; init; }
     public int? HttpStatus { get; init; }
@@ -52,7 +68,6 @@ public sealed record GenerateAiResponse
     public required string RequestId { get; init; }
     public required string Model { get; init; }
     public string? Content { get; init; }
-    public object? Data { get; init; }
     public AiUsageDto? Usage { get; init; }
     public int LatencyMs { get; init; }
     public string? ErrorType { get; init; }

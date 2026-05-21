@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AI Gateway — Console</title>
+<link rel="stylesheet" href="/app/style.css" />
+</head>
+<body>
+
+<header class="app-header">
+  <div class="brand">
+    <span class="logomark">▲</span>
+    <span>AI Gateway</span>
+  </div>
+  <nav id="appNav">
+    <button data-tab="keys" class="active">My Keys</button>
+    <button data-tab="tokens">Access Tokens</button>
+    <button data-tab="dashboard">Usage</button>
+    <button data-tab="errors">Errors</button>
+    <button data-tab="admin" id="adminTabBtn" hidden>Admin</button>
+    <button data-tab="playground">Playground</button>
+  </nav>
+  <div class="user-area">
+    <span id="userBadge"></span>
+    <button id="btnLogout" class="ghost">Sign out</button>
+  </div>
+</header>
+
+<main class="app-main">
+
+  <!-- ===== My Keys ===== -->
+  <section data-panel="keys" class="panel active">
+    <div class="panel-head">
+      <h2>API keys</h2>
+      <button id="btnNewKey" class="primary">+ Add key</button>
+    </div>
+    <p class="muted">Keys are encrypted with AES-256-GCM. Only the SHA-256 fingerprint and partner metadata are visible after save.</p>
+    <table id="tblKeys" class="data-table"></table>
+  </section>
+
+  <!-- ===== Tokens ===== -->
+  <section data-panel="tokens" class="panel">
+    <div class="panel-head">
+      <h2>Personal access tokens</h2>
+      <button id="btnNewToken" class="primary">+ New token</button>
+    </div>
+    <p class="muted">Use a PAT (<code>aigw_…</code>) for backend integrations. Tokens are shown once at creation.</p>
+    <table id="tblTokens" class="data-table"></table>
+  </section>
+
+  <!-- ===== Dashboard ===== -->
+  <section data-panel="dashboard" class="panel">
+    <div class="panel-head">
+      <h2>Usage (last 24 hours)</h2>
+      <select id="dashWindow">
+        <option value="1">1h</option>
+        <option value="6">6h</option>
+        <option value="24" selected>24h</option>
+        <option value="168">7d</option>
+      </select>
+    </div>
+    <div id="dashTiles" class="tiles"></div>
+    <h3>By model</h3>
+    <table id="tblByModel" class="data-table"></table>
+    <h3>By partner</h3>
+    <table id="tblByPartner" class="data-table"></table>
+    <h3>By account key</h3>
+    <table id="tblByKey" class="data-table"></table>
+  </section>
+
+  <!-- ===== Errors ===== -->
+  <section data-panel="errors" class="panel">
+    <div class="panel-head"><h2>Recent errors (24h)</h2></div>
+    <table id="tblErrors" class="data-table"></table>
+  </section>
+
+  <!-- ===== Admin (admins only) ===== -->
+  <section data-panel="admin" class="panel">
+    <div class="panel-head"><h2>System partners</h2></div>
+    <table id="tblPartners" class="data-table"></table>
+
+    <div class="panel-head" style="margin-top:24px"><h2>System models &amp; routes</h2></div>
+    <table id="tblModels" class="data-table"></table>
+  </section>
+
+  <!-- ===== Playground ===== -->
+  <section data-panel="playground" class="panel">
+    <div class="panel-head"><h2>Playground</h2></div>
+    <form id="formPlay">
+      <label>Model
+        <select name="model" required>
+          <option value="text-fast">text-fast</option>
+          <option value="text-pro">text-pro</option>
+        </select>
+      </label>
+      <label>System prompt (optional)
+        <textarea name="systemPrompt" rows="2"></textarea>
+      </label>
+      <label>User prompt
+        <textarea name="prompt" rows="4" required>Hello! Say "hi" back.</textarea>
+      </label>
+      <div class="row">
+        <label>Temperature <input type="number" name="temperature" step="0.1" min="0" max="2" value="0.7" /></label>
+        <label>Max tokens <input type="number" name="maxTokens" min="1" max="32000" value="500" /></label>
+        <label class="inline"><input type="checkbox" name="debug" checked /> Debug routing</label>
+      </div>
+      <button type="submit" class="primary">Generate</button>
+    </form>
+    <pre id="playOut" class="play-out"></pre>
+  </section>
+
+</main>
+
+<!-- ===== Modal ===== -->
+<dialog id="modal">
+  <form method="dialog">
+    <div id="modalBody"></div>
+    <menu><button value="close" class="ghost">Close</button></menu>
+  </form>
+</dialog>
+
+<script src="/app/app.js"></script>
+</body>
+</html>

@@ -6,39 +6,40 @@ namespace AiGateway.Api.Workers;
 
 public sealed class CleanupWorker : BackgroundService
 {
-    private readonly IServiceProvider _serviceProvider;
-    private readonly AiGatewayOptions _options;
+    private readonly IServiceScopeFactory _scopeFactory;
+    private readonly AiGatewayOptions _opts;
     private readonly ILogger<CleanupWorker> _logger;
 
-    public CleanupWorker(
-        IServiceProvider serviceProvider,
-        IOptions<AiGatewayOptions> options,
-        ILogger<CleanupWorker> logger)
+    public CleanupWorker(IServiceScopeFactory scopeFactory, IOptions<AiGatewayOptions> opts, ILogger<CleanupWorker> logger)
     {
-        _serviceProvider = serviceProvider;
-        _options = options.Value;
+        _scopeFactory = scopeFactory;
+        _opts = opts.Value;
         _logger = logger;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken);
+        // Run hourly.
+        var interval = TimeSpan.FromHours(1);
+        await Task.Delay(TimeSpan.FromMinutes(2), stoppingToken);
 
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
-                using var scope = _serviceProvider.CreateScope();
-                var repository = scope.ServiceProvider.GetRequiredService<AiErrorRepository>();
-                var days = _options.ErrorEventsRetentionDays;
-                await repository.CleanupErrorEventsAsync(days, stoppingToken);
+                using var scope = _scopeFactory.CreateScope();
+                var repo = scope.ServiceProvider.GetRequiredService<AiErrorRepository>();
+                var cutoff = DateTimeOffset.UtcNow.AddDays(-_opts.ErrorEventsRetentionDays);
+                var n = await repo.DeleteOldEventsAsync(cutoff, stoppingToken);
+                if (n > 0) _logger.LogInformation("Cleaned up {N} old error events (before {Cutoff})", n, cutoff);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Cleanup worker failed");
+                _logger.LogError(ex, "Cleanup iteration failed");
             }
 
-            await Task.Delay(TimeSpan.FromHours(24), stoppingToken);
+            try { await Task.Delay(interval, stoppingToken); }
+            catch (OperationCanceledException) { break; }
         }
     }
 }

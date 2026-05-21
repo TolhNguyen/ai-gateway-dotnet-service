@@ -13,83 +13,55 @@ public sealed class RedisMetricBuffer
     }
 
     public async Task RecordSuccessAsync(
-        string clientCode,
-        string modelCode,
-        string partnerCode,
-        string accountCode,
-        int latencyMs,
-        AiUsageDto? usage,
-        bool fallbackSuccess)
+        long userId, string modelCode, string partnerCode, string accountKeyCode,
+        int latencyMs, AiUsageDto? usage, bool fallbackSuccess)
     {
-        var key = CurrentHourMetricKey(clientCode, modelCode, partnerCode, accountCode);
+        var key = HourKey(userId, modelCode, partnerCode, accountKeyCode);
 
         var batch = _db.CreateBatch();
         _ = batch.HashIncrementAsync(key, "total", 1);
         _ = batch.HashIncrementAsync(key, "success", 1);
         _ = batch.HashIncrementAsync(key, "latency_total_ms", latencyMs);
         _ = batch.HashIncrementAsync(key, "latency_count", 1);
+        if (fallbackSuccess) _ = batch.HashIncrementAsync(key, "fallback_success", 1);
 
-        if (fallbackSuccess)
-        {
-            _ = batch.HashIncrementAsync(key, "fallback_success", 1);
-        }
+        if (usage?.InputTokens  is > 0) _ = batch.HashIncrementAsync(key, "tokens_in",   usage.InputTokens.Value);
+        if (usage?.OutputTokens is > 0) _ = batch.HashIncrementAsync(key, "tokens_out",  usage.OutputTokens.Value);
+        if (usage?.TotalTokens  is > 0) _ = batch.HashIncrementAsync(key, "tokens_total", usage.TotalTokens.Value);
 
-        if (usage?.InputTokens is > 0)
-        {
-            _ = batch.HashIncrementAsync(key, "tokens_in", usage.InputTokens.Value);
-        }
-
-        if (usage?.OutputTokens is > 0)
-        {
-            _ = batch.HashIncrementAsync(key, "tokens_out", usage.OutputTokens.Value);
-        }
-
-        if (usage?.TotalTokens is > 0)
-        {
-            _ = batch.HashIncrementAsync(key, "tokens_total", usage.TotalTokens.Value);
-        }
-
+        _ = batch.HashSetAsync(key, "_dirty", "1");
         _ = batch.KeyExpireAsync(key, TimeSpan.FromSeconds(RedisKeys.RuntimeRetentionSeconds));
         _ = batch.SetAddAsync(RedisKeys.MetricIndex(), key);
         batch.Execute();
-
         await Task.CompletedTask;
     }
 
     public async Task RecordErrorAsync(
-        string clientCode,
-        string modelCode,
-        string partnerCode,
-        string accountCode,
-        int latencyMs,
-        string errorType)
+        long userId, string modelCode, string partnerCode, string accountKeyCode,
+        int latencyMs, string errorType)
     {
-        var key = CurrentHourMetricKey(clientCode, modelCode, partnerCode, accountCode);
-        var safeErrorType = string.IsNullOrWhiteSpace(errorType) ? "unknown" : errorType;
+        var key = HourKey(userId, modelCode, partnerCode, accountKeyCode);
+        var safeType = string.IsNullOrWhiteSpace(errorType) ? "unknown" : errorType;
 
         var batch = _db.CreateBatch();
         _ = batch.HashIncrementAsync(key, "total", 1);
         _ = batch.HashIncrementAsync(key, "failed", 1);
-        _ = batch.HashIncrementAsync(key, $"error_{safeErrorType}", 1);
+        _ = batch.HashIncrementAsync(key, $"error_{safeType}", 1);
         _ = batch.HashIncrementAsync(key, "latency_total_ms", latencyMs);
         _ = batch.HashIncrementAsync(key, "latency_count", 1);
+        _ = batch.HashSetAsync(key, "_dirty", "1");
         _ = batch.KeyExpireAsync(key, TimeSpan.FromSeconds(RedisKeys.RuntimeRetentionSeconds));
         _ = batch.SetAddAsync(RedisKeys.MetricIndex(), key);
         batch.Execute();
-
         await Task.CompletedTask;
     }
 
-    private static string CurrentHourMetricKey(
-        string clientCode,
-        string modelCode,
-        string partnerCode,
-        string accountCode)
+    private static string HourKey(long userId, string m, string p, string k)
     {
-        var hour = DateTimeOffset.UtcNow.ToString("yyyyMMddHH");
-        return RedisKeys.MetricHour(hour, Safe(clientCode), Safe(modelCode), Safe(partnerCode), Safe(accountCode));
+        var h = DateTimeOffset.UtcNow.ToString("yyyyMMddHH");
+        return RedisKeys.MetricHour(h, userId, Safe(m), Safe(p), Safe(k));
     }
 
-    private static string Safe(string value)
-        => string.IsNullOrWhiteSpace(value) ? "unknown" : value.Replace(':', '_');
+    private static string Safe(string v)
+        => string.IsNullOrWhiteSpace(v) ? "unknown" : v.Replace(':', '_');
 }

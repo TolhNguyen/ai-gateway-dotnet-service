@@ -1,228 +1,291 @@
-using System.Text.Json;
+using System.Security.Cryptography;
 using System.Text.Json.Serialization;
-using AiGateway.Api.Application;
+using AiGateway.Api.Application.AI;
+using AiGateway.Api.Application.Auth;
+using AiGateway.Api.Application.Config;
+using AiGateway.Api.Application.HealthCheck;
 using AiGateway.Api.Infrastructure.Database;
+using AiGateway.Api.Infrastructure.Http;
 using AiGateway.Api.Infrastructure.Partners;
 using AiGateway.Api.Infrastructure.Redis;
 using AiGateway.Api.Infrastructure.Security;
 using AiGateway.Api.Options;
 using AiGateway.Api.Workers;
-using Dapper;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Npgsql;
 using StackExchange.Redis;
 
 var builder = WebApplication.CreateBuilder(args);
 
-DefaultTypeMap.MatchNamesWithUnderscores = true;
+// ─── Bootstrap secrets ───────────────────────────────────────────────────
+//   Self-generates AES key and JWT signing key on first run and persists
+//   them under PGDATA so they survive container restarts.
+BootstrapSecrets(builder);
 
+// ─── Options ────────────────────────────────────────────────────────────
 builder.Services
     .AddOptions<AiGatewayOptions>()
     .Bind(builder.Configuration.GetSection("AiGateway"))
-    .Validate(options => !string.IsNullOrWhiteSpace(options.EncryptionKeyBase64), "AiGateway:EncryptionKeyBase64 is required")
-    .Validate(options =>
-    {
-        try
-        {
-            return Convert.FromBase64String(options.EncryptionKeyBase64).Length == 32;
-        }
-        catch
-        {
-            return false;
-        }
-    }, "AiGateway:EncryptionKeyBase64 must decode to 32 bytes")
-    .ValidateOnStart();
+    .ValidateDataAnnotations().ValidateOnStart();
 
 builder.Services
-    .AddOptions<AdminAuthOptions>()
-    .Bind(builder.Configuration.GetSection("AdminAuth"))
-    .Validate(options =>
-    {
-        if (!options.Enabled) return true;
-        if (options.AllowInDevelopmentWithoutKey) return true;
-        return !string.IsNullOrWhiteSpace(options.ApiKeyHash);
-    }, "AdminAuth:ApiKeyHash is required when AdminAuth is enabled")
-    .ValidateOnStart();
+    .AddOptions<JwtOptions>()
+    .Bind(builder.Configuration.GetSection("Jwt"))
+    .ValidateDataAnnotations().ValidateOnStart();
 
 builder.Services
-    .AddControllers()
-    .AddJsonOptions(options =>
-    {
-        options.JsonSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
-        options.JsonSerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
-        options.JsonSerializerOptions.WriteIndented = false;
-    });
+    .AddOptions<OpenRouterOptions>()
+    .Bind(builder.Configuration.GetSection("OpenRouter"));
 
-builder.Services.AddSingleton(_ =>
+// ─── Logging ────────────────────────────────────────────────────────────
+builder.Logging.AddSimpleConsole(o =>
 {
-    var connectionString =
-        Environment.GetEnvironmentVariable("ConnectionStrings__Postgres")
-        ?? Environment.GetEnvironmentVariable("POSTGRES_CONNECTION_STRING")
-        ?? builder.Configuration.GetConnectionString("Postgres")
-        ?? throw new InvalidOperationException("Missing PostgreSQL connection string");
-
-    if (builder.Environment.IsProduction() &&
-        (connectionString.Contains("localhost", StringComparison.OrdinalIgnoreCase) ||
-         connectionString.Contains("127.0.0.1", StringComparison.OrdinalIgnoreCase)))
-    {
-        throw new InvalidOperationException(
-            "Production is using local PostgreSQL. Set ConnectionStrings__Postgres in Render Environment.");
-    }
-
-    var pg = new NpgsqlConnectionStringBuilder(connectionString);
-    Console.WriteLine($"Postgres config loaded. Host={pg.Host}, Database={pg.Database}, Username={pg.Username}");
-
-    var dataSourceBuilder = new NpgsqlDataSourceBuilder(connectionString);
-    return dataSourceBuilder.Build();
+    o.IncludeScopes = true;
+    o.SingleLine = true;
+    o.TimestampFormat = "yyyy-MM-dd HH:mm:ss.fff ";
 });
 
-builder.Services.AddSingleton<IConnectionMultiplexer>(_ =>
+// ─── Kestrel limits ────────────────────────────────────────────────────
+var gwOpts = builder.Configuration.GetSection("AiGateway").Get<AiGatewayOptions>() ?? new();
+builder.WebHost.ConfigureKestrel(k =>
 {
-    var redisConnectionString =
-        builder.Configuration["Redis:ConnectionString"]
-        ?? Environment.GetEnvironmentVariable("Redis__ConnectionString")
-        ?? Environment.GetEnvironmentVariable("REDIS_CONNECTION_STRING")
-        ?? "localhost:6379";
-
-    if (redisConnectionString.StartsWith("redis://", StringComparison.OrdinalIgnoreCase) ||
-        redisConnectionString.StartsWith("rediss://", StringComparison.OrdinalIgnoreCase))
-    {
-        var uri = new Uri(redisConnectionString);
-
-        var options = new ConfigurationOptions
-        {
-            EndPoints = { { uri.Host, uri.Port } },
-            Ssl = uri.Scheme.Equals("rediss", StringComparison.OrdinalIgnoreCase),
-            AbortOnConnectFail = false
-        };
-
-        if (!string.IsNullOrWhiteSpace(uri.UserInfo))
-        {
-            var parts = uri.UserInfo.Split(':', 2);
-
-            if (parts.Length == 2)
-            {
-                options.User = Uri.UnescapeDataString(parts[0]);
-                options.Password = Uri.UnescapeDataString(parts[1]);
-            }
-            else
-            {
-                options.Password = Uri.UnescapeDataString(parts[0]);
-            }
-        }
-
-        return ConnectionMultiplexer.Connect(options);
-    }
-
-    var parsed = ConfigurationOptions.Parse(redisConnectionString);
-    parsed.AbortOnConnectFail = false;
-
-    return ConnectionMultiplexer.Connect(parsed);
+    k.Limits.MaxRequestBodySize = gwOpts.MaxRequestBodyBytes;
 });
 
-builder.Services.AddHttpClient("ai-partners", client =>
-{
-    client.DefaultRequestHeaders.UserAgent.ParseAdd("AiGateway/1.0");
-});
+// ─── Data sources ──────────────────────────────────────────────────────
+var pgConn = builder.Configuration.GetConnectionString("Postgres")
+             ?? throw new InvalidOperationException("Missing ConnectionStrings:Postgres");
+var dsBuilder = new NpgsqlDataSourceBuilder(pgConn);
+builder.Services.AddSingleton(_ => dsBuilder.Build());
 
+var redisConn = builder.Configuration["Redis:ConnectionString"]
+                ?? throw new InvalidOperationException("Missing Redis:ConnectionString");
+var muxConfig = ConfigurationOptions.Parse(redisConn);
+muxConfig.AbortOnConnectFail = false;
+muxConfig.ConnectRetry = 5;
+muxConfig.ConnectTimeout = 5000;
+builder.Services.AddSingleton<IConnectionMultiplexer>(_ => ConnectionMultiplexer.Connect(muxConfig));
+
+// ─── Http clients ──────────────────────────────────────────────────────
+builder.Services.AddHttpClient("gemini");
+builder.Services.AddHttpClient("openai_compatible");
+builder.Services.AddHttpClient("openrouter");
+
+// ─── Security ─────────────────────────────────────────────────────────
 builder.Services.AddSingleton<ISecretProtector, AesGcmSecretProtector>();
-builder.Services.AddSingleton<ApiKeyHasher>();
+builder.Services.AddSingleton<IPasswordHasher, BcryptPasswordHasher>();
+builder.Services.AddSingleton<TokenHasher>();
+builder.Services.AddSingleton<JwtService>();
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<ICurrentUser, CurrentUser>();
 
+// ─── Repositories ─────────────────────────────────────────────────────
+builder.Services.AddScoped<MigrationRunner>();
+builder.Services.AddScoped<UserRepository>();
+builder.Services.AddScoped<AccountKeyRepository>();
 builder.Services.AddScoped<AiConfigRepository>();
 builder.Services.AddScoped<AiMetricsRepository>();
 builder.Services.AddScoped<AiErrorRepository>();
 
-builder.Services.AddScoped<RedisConfigCache>();
-builder.Services.AddScoped<RedisRateLimitStore>();
-builder.Services.AddScoped<RedisCooldownStore>();
-builder.Services.AddScoped<RedisMetricBuffer>();
+// ─── Redis layer ──────────────────────────────────────────────────────
+builder.Services.AddSingleton<RedisRateLimitStore>();
+builder.Services.AddSingleton<RedisCooldownStore>();
+builder.Services.AddSingleton<RedisMetricBuffer>();
+builder.Services.AddSingleton<RedisConfigCache>();
 
+// ─── Partner clients ──────────────────────────────────────────────────
+builder.Services.AddSingleton<IAiPartnerClient, GeminiClient>();
+builder.Services.AddSingleton<IAiPartnerClient, OpenAiCompatibleClient>();
+builder.Services.AddSingleton<IAiPartnerClient, OpenRouterClient>();
+builder.Services.AddSingleton<PartnerClientFactory>();
+
+// ─── Application services ─────────────────────────────────────────────
+builder.Services.AddSingleton<TokenEstimator>();
+builder.Services.AddScoped<AuthService>();
+builder.Services.AddScoped<AccountKeyService>();
 builder.Services.AddScoped<AiConfigService>();
-builder.Services.AddScoped<ClientAuthService>();
 builder.Services.AddScoped<AiRouteSelector>();
-builder.Services.AddScoped<TokenEstimator>();
 builder.Services.AddScoped<ErrorRecordingService>();
 builder.Services.AddScoped<AiGatewayService>();
-builder.Services.AddScoped<DataSeeder>();
+builder.Services.AddScoped<ApiKeyHealthCheckService>();
 
-builder.Services.AddScoped<IAiPartnerClient, OpenAiCompatibleClient>();
-builder.Services.AddScoped<IAiPartnerClient, GeminiClient>();
-builder.Services.AddScoped<IAiPartnerClient, OpenRouterClient>();
-builder.Services.AddScoped<PartnerClientFactory>();
+// ─── Authentication: JWT + PAT side-by-side, dispatched by token prefix ─
+const string PolicyScheme = "JwtOrPat";
 
+builder.Services
+    .AddAuthentication(o =>
+    {
+        o.DefaultScheme = PolicyScheme;
+        o.DefaultChallengeScheme = PolicyScheme;
+    })
+    .AddPolicyScheme(PolicyScheme, "JWT or PAT", options =>
+    {
+        options.ForwardDefaultSelector = ctx =>
+        {
+            var auth = ctx.Request.Headers.Authorization.ToString();
+            if (!string.IsNullOrEmpty(auth) &&
+                auth.StartsWith("Bearer aigw_", StringComparison.OrdinalIgnoreCase))
+            {
+                return PatAuthenticationHandler.SchemeName;
+            }
+            return JwtBearerDefaults.AuthenticationScheme;
+        };
+    })
+    .AddJwtBearer(JwtBearerDefaults.AuthenticationScheme, jwt =>
+    {
+        // Configured via PostConfigure once JwtService is built so we don't need a 2-pass DI.
+    })
+    .AddScheme<PatAuthenticationOptions, PatAuthenticationHandler>(PatAuthenticationHandler.SchemeName, _ => { });
+
+builder.Services.AddSingleton<Microsoft.Extensions.Options.IPostConfigureOptions<JwtBearerOptions>>(sp =>
+    new ConfigureJwtBearer(sp.GetRequiredService<JwtService>()));
+
+builder.Services.AddAuthorization();
+
+// ─── MVC + JSON ───────────────────────────────────────────────────────
+builder.Services.AddControllers().AddJsonOptions(o =>
+{
+    o.JsonSerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase;
+    o.JsonSerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
+});
+
+// ─── CORS (open by default — restrict via reverse proxy) ──────────────
+builder.Services.AddCors(o => o.AddDefaultPolicy(p =>
+    p.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));
+
+// ─── Hosted services ──────────────────────────────────────────────────
 builder.Services.AddHostedService<MetricFlushWorker>();
 builder.Services.AddHostedService<CleanupWorker>();
+builder.Services.AddHostedService<HealthCheckWorker>();
 
 var app = builder.Build();
 
-using (var scope = app.Services.CreateScope())
+// ─── Run migrations + bootstrap admin BEFORE serving requests ─────────
+await using (var scope = app.Services.CreateAsyncScope())
 {
-    await RunMigrationsAsync(scope.ServiceProvider);
-    var seeder = scope.ServiceProvider.GetRequiredService<DataSeeder>();
-    await seeder.SeedAsync();
+    var runner = scope.ServiceProvider.GetRequiredService<MigrationRunner>();
+    var migrationsDir = Path.Combine(AppContext.BaseDirectory, "migrations");
+    await runner.RunAsync(migrationsDir);
+
+    await EnsureBootstrapAdminAsync(scope.ServiceProvider);
 }
 
-app.UseMiddleware<AdminAuthMiddleware>();
+// ─── Middleware pipeline ──────────────────────────────────────────────
+app.UseDefaultFiles();
 app.UseStaticFiles();
+app.UseCors();
+
+app.UseMiddleware<CorrelationIdMiddleware>();
+
+app.UseAuthentication();
+app.UseAuthorization();
+
 app.MapControllers();
-app.MapGet("/", () => Results.Redirect("/dashboard/index.html"));
 
 app.Run();
-static async Task RunMigrationsAsync(IServiceProvider services)
+
+// =============================================================
+// Helpers
+// =============================================================
+
+static void BootstrapSecrets(WebApplicationBuilder builder)
 {
-    var logger = services
-        .GetRequiredService<ILoggerFactory>()
-        .CreateLogger("MigrationRunner");
+    // Persisted under /var/lib/postgresql/data so they survive container restarts
+    // (single mounted volume already exists for the bundled Postgres).
+    var pgDataDir = Environment.GetEnvironmentVariable("PGDATA")
+                    ?? Path.Combine("/var/lib/postgresql", "data");
 
-    var dataSource = services.GetRequiredService<NpgsqlDataSource>();
+    var aesPath = Path.Combine(pgDataDir, ".aigateway.aeskey");
+    var jwtPath = Path.Combine(pgDataDir, ".aigateway.jwtkey");
 
-    var migrationDir = FindMigrationDirectory();
-
-    if (migrationDir is null)
+    var aesKey = builder.Configuration["AiGateway:EncryptionKeyBase64"];
+    if (string.IsNullOrWhiteSpace(aesKey))
     {
-        throw new InvalidOperationException("Migration directory not found. Expected a 'migrations' folder in the app directory.");
+        aesKey = ReadOrCreateKey(aesPath, 32);
+        builder.Configuration["AiGateway:EncryptionKeyBase64"] = aesKey;
     }
 
-    var files = Directory
-        .GetFiles(migrationDir, "*.sql")
-        .OrderBy(x => x)
-        .ToArray();
-
-    if (files.Length == 0)
+    var jwtKey = builder.Configuration["Jwt:SecretBase64"];
+    if (string.IsNullOrWhiteSpace(jwtKey))
     {
-        throw new InvalidOperationException($"No SQL migration files found in: {migrationDir}");
+        jwtKey = ReadOrCreateKey(jwtPath, 32);
+        builder.Configuration["Jwt:SecretBase64"] = jwtKey;
     }
+}
 
-    await using var connection = await dataSource.OpenConnectionAsync();
-
-    foreach (var file in files)
+static string ReadOrCreateKey(string path, int byteLen)
+{
+    try
     {
-        var sql = await File.ReadAllTextAsync(file);
-
-        if (string.IsNullOrWhiteSpace(sql))
+        if (File.Exists(path))
         {
-            continue;
+            var existing = File.ReadAllText(path).Trim();
+            if (!string.IsNullOrEmpty(existing)) return existing;
         }
 
-        logger.LogInformation("Applying migration: {File}", Path.GetFileName(file));
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        var raw = RandomNumberGenerator.GetBytes(byteLen);
+        var b64 = Convert.ToBase64String(raw);
 
-        await using var command = connection.CreateCommand();
-        command.CommandText = sql;
-        command.CommandTimeout = 120;
-        await command.ExecuteNonQueryAsync();
-
-        logger.LogInformation("Applied migration: {File}", Path.GetFileName(file));
+        File.WriteAllText(path, b64);
+        try
+        {
+            File.SetUnixFileMode(path,
+                UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        }
+        catch { /* not on unix or permission issue — non-fatal */ }
+        return b64;
+    }
+    catch (UnauthorizedAccessException)
+    {
+        // Fallback: ephemeral key. Issues a warning on first auth attempt.
+        return Convert.ToBase64String(RandomNumberGenerator.GetBytes(byteLen));
     }
 }
 
-static string? FindMigrationDirectory()
+static async Task EnsureBootstrapAdminAsync(IServiceProvider sp)
 {
-    var candidates = new[]
-    {
-        Path.Combine(AppContext.BaseDirectory, "migrations"),
-        Path.Combine(Directory.GetCurrentDirectory(), "migrations"),
-        Path.Combine(Directory.GetCurrentDirectory(), "..", "migrations"),
-        Path.Combine(Directory.GetCurrentDirectory(), "..", "..", "migrations")
-    };
+    var users = sp.GetRequiredService<UserRepository>();
+    var hasher = sp.GetRequiredService<IPasswordHasher>();
+    var opts = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<AiGatewayOptions>>().Value;
+    var logger = sp.GetRequiredService<ILogger<Program>>();
 
-    return candidates.FirstOrDefault(Directory.Exists);
+    var count = await users.CountAsync();
+    if (count > 0)
+    {
+        logger.LogInformation("Users already exist — skipping bootstrap admin");
+        return;
+    }
+
+    if (string.IsNullOrWhiteSpace(opts.BootstrapAdminEmail) ||
+        string.IsNullOrWhiteSpace(opts.BootstrapAdminPassword))
+    {
+        logger.LogWarning("BootstrapAdminEmail/Password not set — no initial admin will be created.");
+        return;
+    }
+
+    var hash = hasher.Hash(opts.BootstrapAdminPassword);
+    var admin = await users.CreateAsync(opts.BootstrapAdminEmail, hash, role: "admin", displayName: "Administrator");
+    logger.LogWarning(
+        "Created bootstrap admin account: {Email} (id={Id}). CHANGE THE PASSWORD NOW.",
+        admin.Email, admin.Id);
 }
+
+// =============================================================
+// Late JWT config binder
+// =============================================================
+internal sealed class ConfigureJwtBearer : Microsoft.Extensions.Options.IPostConfigureOptions<JwtBearerOptions>
+{
+    private readonly JwtService _jwt;
+    public ConfigureJwtBearer(JwtService jwt) { _jwt = jwt; }
+
+    public void PostConfigure(string? name, JwtBearerOptions options)
+    {
+        if (name != JwtBearerDefaults.AuthenticationScheme) return;
+        options.TokenValidationParameters = _jwt.ValidationParameters;
+        options.RequireHttpsMetadata = false;  // single-container deployment behind a reverse proxy.
+        options.MapInboundClaims = false;
+    }
+}
+
+public partial class Program { }
