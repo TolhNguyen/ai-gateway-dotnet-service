@@ -1,0 +1,8 @@
+# Tells the CI gate where the Governance Center lives and how this node
+# should publish updates after a successful main merge.
+
+governance_center_url: https://scpa-governance.internal.example.com
+publish_mode: push   # 'push' (CI calls /reindex) or 'pull' (GC scrapes)
+auth:
+  type: bearer
+  secret_env: SCPA_GOVERNANCE_TOKEN

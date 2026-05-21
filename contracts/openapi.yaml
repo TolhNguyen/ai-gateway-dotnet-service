@@ -1,0 +1,875 @@
+openapi: 3.1.0
+info:
+  title: AI Gateway API
+  version: 0.1.0
+  description: |
+    Multi-tenant AI gateway. Centralizes provider key isolation, routing,
+    fallback, rate limiting, and usage observability. The AI Capability
+    Node of the Microservice Node Governance Platform.
+  contact:
+    name: AI Platform Team
+    email: lead.ai-gateway@example.com
+
+servers:
+  - url: http://localhost:8080
+    description: Local single-container deployment
+  - url: https://ai-gateway.internal.example.com
+    description: Production
+
+tags:
+  - name: auth
+    description: Sign-up and sign-in.
+  - name: me
+    description: Authenticated user — profile, tokens, keys, dashboards.
+  - name: ai
+    description: AI generation. The primary consumer-facing endpoint.
+  - name: admin
+    description: Admin-only configuration of partners, models, and routes.
+  - name: health
+    description: Liveness and readiness probes.
+
+security:
+  - bearerAuth: []
+
+paths:
+  # ───────── Health (anonymous) ─────────
+  /health:
+    get:
+      tags: [health]
+      operationId: getLive
+      summary: Liveness probe
+      security: []
+      responses:
+        '200':
+          description: Process is alive.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: ok }
+                  time:   { type: string, format: date-time }
+
+  /health/ready:
+    get:
+      tags: [health]
+      operationId: getReady
+      summary: Readiness probe (DB + Redis)
+      security: []
+      responses:
+        '200': { description: Ready. }
+        '503': { description: One or more dependencies unreachable. }
+
+  # ───────── Auth ─────────
+  /v1/auth/register:
+    post:
+      tags: [auth]
+      operationId: register
+      summary: Self-service registration. Creates a 'user' role account.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RegisterRequest' }
+      responses:
+        '200':
+          description: User created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserDto' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /v1/auth/login:
+    post:
+      tags: [auth]
+      operationId: login
+      summary: Exchange email + password for a JWT.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200':
+          description: JWT + user profile.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LoginResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  # ───────── Me ─────────
+  /v1/me:
+    get:
+      tags: [me]
+      operationId: getMe
+      summary: Current user profile.
+      responses:
+        '200':
+          description: Profile.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserDto' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /v1/me/tokens:
+    get:
+      tags: [me]
+      operationId: listMyTokens
+      summary: List personal access tokens. Raw token values are never returned here.
+      responses:
+        '200':
+          description: List of tokens (prefix only).
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/PatDto' }
+    post:
+      tags: [me]
+      operationId: createMyToken
+      summary: Create a personal access token. Raw token is returned ONCE.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreatePatRequest' }
+      responses:
+        '200':
+          description: Token created. The 'token' field is shown only here.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CreatePatResponse' }
+
+  /v1/me/tokens/{id}:
+    delete:
+      tags: [me]
+      operationId: revokeMyToken
+      summary: Revoke a personal access token.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer, format: int64 } }
+      responses:
+        '204': { description: Revoked. }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /v1/me/keys:
+    get:
+      tags: [me]
+      operationId: listMyKeys
+      summary: List provider API keys. The raw key is never returned.
+      responses:
+        '200':
+          description: List.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/AccountKeyDto' }
+    post:
+      tags: [me]
+      operationId: createMyKey
+      summary: Add a provider API key. The key is encrypted at rest (AES-256-GCM).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateAccountKeyRequest' }
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AccountKeyDto' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /v1/me/keys/{id}:
+    get:
+      tags: [me]
+      operationId: getMyKey
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer, format: int64 } }
+      responses:
+        '200':
+          description: Key metadata (fingerprint only).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AccountKeyDto' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [me]
+      operationId: updateMyKey
+      summary: Update key metadata or rotate the underlying secret.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer, format: int64 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateAccountKeyRequest' }
+      responses:
+        '200':
+          description: Updated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AccountKeyDto' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [me]
+      operationId: deleteMyKey
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer, format: int64 } }
+      responses:
+        '204': { description: Deleted. }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /v1/me/keys/{id}/health-check:
+    post:
+      tags: [me]
+      operationId: runMyKeyHealthCheck
+      summary: Synchronously probe a key against its partner's health-check model.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer, format: int64 } }
+      responses:
+        '200':
+          description: Probe result.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:        { type: integer, format: int64 }
+                  status:    { type: string, enum: [ok, degraded, error, unknown] }
+                  error:     { type: string, nullable: true }
+                  latencyMs: { type: integer, nullable: true }
+                  checkedAt: { type: string, format: date-time }
+
+  /v1/me/keys/health:
+    get:
+      tags: [me]
+      operationId: listMyKeysHealth
+      summary: Live status of every active key (inflight + cooldown included).
+      responses:
+        '200':
+          description: List.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/AccountKeyHealthDto' }
+
+  /v1/me/dashboard/overview:
+    get:
+      tags: [me]
+      operationId: getDashboardOverview
+      parameters: [ { $ref: '#/components/parameters/Hours' } ]
+      responses:
+        '200':
+          description: Aggregated metrics window.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  hours: { type: integer }
+                  data:  { $ref: '#/components/schemas/DashboardOverviewDto' }
+
+  /v1/me/dashboard/models:
+    get:
+      tags: [me]
+      operationId: getDashboardByModel
+      parameters: [ { $ref: '#/components/parameters/Hours' } ]
+      responses:
+        '200':
+          description: Metrics grouped by model.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/DashboardGroupMetricDto' }
+
+  /v1/me/dashboard/partners:
+    get:
+      tags: [me]
+      operationId: getDashboardByPartner
+      parameters: [ { $ref: '#/components/parameters/Hours' } ]
+      responses:
+        '200':
+          description: Metrics grouped by partner.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/DashboardGroupMetricDto' }
+
+  /v1/me/dashboard/account-keys:
+    get:
+      tags: [me]
+      operationId: getDashboardByAccountKey
+      parameters: [ { $ref: '#/components/parameters/Hours' } ]
+      responses:
+        '200':
+          description: Metrics grouped by account key.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/DashboardGroupMetricDto' }
+
+  /v1/me/dashboard/errors:
+    get:
+      tags: [me]
+      operationId: getDashboardErrors
+      parameters:
+        - { $ref: '#/components/parameters/Hours' }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 1000, default: 200 }
+      responses:
+        '200':
+          description: Error aggregates.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/DashboardErrorDto' }
+
+  # ───────── AI generation (the primary endpoint) ─────────
+  /v1/ai/generate:
+    post:
+      tags: [ai]
+      operationId: generate
+      summary: Generate a single AI response. The gateway picks a provider route from the caller's active keys.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/GenerateAiRequest' }
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GenerateAiResponse' }
+        '401':
+          description: Auth failure (provider-level credential rejected after fallback).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GenerateAiResponse' }
+        '403':
+          description: Permission failure or no usable provider key for this user.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GenerateAiResponse' }
+        '429':
+          description: Rate-limit or quota exceeded.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GenerateAiResponse' }
+        '502':
+          description: All providers failed for non-retryable reasons.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GenerateAiResponse' }
+        '504':
+          description: Upstream timeout.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GenerateAiResponse' }
+
+  # ───────── Admin ─────────
+  /v1/admin/partners:
+    get:
+      tags: [admin]
+      operationId: listPartners
+      responses:
+        '200':
+          description: List of partners.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/PartnerDto' }
+
+  /v1/admin/partners/{code}:
+    put:
+      tags: [admin]
+      operationId: upsertPartner
+      parameters:
+        - { name: code, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpsertPartnerRequest' }
+      responses:
+        '200':
+          description: Upserted partner.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PartnerDto' }
+
+  /v1/admin/partners/{code}/status:
+    patch:
+      tags: [admin]
+      operationId: setPartnerStatus
+      parameters:
+        - { name: code, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateStatusRequest' }
+      responses:
+        '204': { description: Updated. }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /v1/admin/models:
+    get:
+      tags: [admin]
+      operationId: listModels
+      responses:
+        '200':
+          description: List of models.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ModelDto' }
+
+  /v1/admin/models/{code}:
+    put:
+      tags: [admin]
+      operationId: upsertModel
+      parameters:
+        - { name: code, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpsertModelRequest' }
+      responses:
+        '200':
+          description: Upserted model.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ModelDto' }
+
+  /v1/admin/models/{code}/status:
+    patch:
+      tags: [admin]
+      operationId: setModelStatus
+      parameters:
+        - { name: code, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateStatusRequest' }
+      responses:
+        '204': { description: Updated. }
+
+  /v1/admin/models/{code}/routes:
+    get:
+      tags: [admin]
+      operationId: listRoutesForModel
+      parameters:
+        - { name: code, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Routes for the model.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ModelRouteDto' }
+    put:
+      tags: [admin]
+      operationId: upsertRoute
+      parameters:
+        - { name: code, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpsertRouteRequest' }
+      responses:
+        '200':
+          description: Upserted route.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ModelRouteDto' }
+
+  /v1/admin/models/routes/{id}:
+    delete:
+      tags: [admin]
+      operationId: deleteRoute
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer, format: int64 } }
+      responses:
+        '204': { description: Deleted. }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT or PAT (prefix `aigw_`)
+      description: |
+        Pass either a JWT obtained from `/v1/auth/login` or a Personal
+        Access Token (prefix `aigw_`) in the `Authorization: Bearer <token>`
+        header. The server auto-dispatches between the two schemes based on
+        the prefix.
+
+  parameters:
+    Hours:
+      name: hours
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 720, default: 24 }
+      description: Look-back window in hours (max 30 days).
+
+  responses:
+    BadRequest:
+      description: Validation error.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    Unauthorized:
+      description: Authentication required or failed.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    NotFound:
+      description: Resource not found.
+
+  schemas:
+    ErrorResponse:
+      type: object
+      properties:
+        error: { type: string }
+
+    # ─── Auth ───
+    RegisterRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:       { type: string, format: email, maxLength: 255 }
+        password:    { type: string, minLength: 8, maxLength: 128 }
+        displayName: { type: string, maxLength: 255, nullable: true }
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:    { type: string, format: email }
+        password: { type: string }
+    LoginResponse:
+      type: object
+      required: [accessToken, tokenType, expiresInSeconds, user]
+      properties:
+        accessToken:      { type: string }
+        tokenType:        { type: string, example: Bearer }
+        expiresInSeconds: { type: integer }
+        user:             { $ref: '#/components/schemas/UserDto' }
+    UserDto:
+      type: object
+      properties:
+        id:          { type: integer, format: int64 }
+        email:       { type: string }
+        role:        { type: string, enum: [user, admin] }
+        status:      { type: string, enum: [active, disabled] }
+        displayName: { type: string, nullable: true }
+        createdAt:   { type: string, format: date-time }
+
+    # ─── PATs ───
+    CreatePatRequest:
+      type: object
+      required: [name]
+      properties:
+        name:          { type: string, minLength: 1, maxLength: 255 }
+        expiresInDays: { type: integer, minimum: 0, maximum: 3650, nullable: true }
+    CreatePatResponse:
+      type: object
+      required: [id, name, token, createdAt]
+      properties:
+        id:        { type: integer, format: int64 }
+        name:      { type: string }
+        token:
+          type: string
+          description: Raw token. Returned ONLY at creation. Format `aigw_<24 url-safe chars>`.
+          example: aigw_5K3xQs8nLp_vT7yU2eHmA1Bw
+        expiresAt: { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time }
+    PatDto:
+      type: object
+      properties:
+        id:          { type: integer, format: int64 }
+        name:        { type: string }
+        tokenPrefix: { type: string, example: aigw_5K3xQs8n }
+        lastUsedAt:  { type: string, format: date-time, nullable: true }
+        expiresAt:   { type: string, format: date-time, nullable: true }
+        createdAt:   { type: string, format: date-time }
+
+    # ─── Account keys ───
+    AccountKeyDto:
+      type: object
+      properties:
+        id:                  { type: integer, format: int64 }
+        partnerCode:         { type: string }
+        code:                { type: string }
+        name:                { type: string, nullable: true }
+        status:              { type: string, enum: [active, disabled] }
+        apiKeyMask:
+          type: string
+          description: SHA-256 fingerprint prefix. The raw key is never returned.
+          example: "sha256:7a3f9c01..."
+        rpmLimit:            { type: integer, nullable: true }
+        rpdLimit:            { type: integer, nullable: true }
+        tpmLimit:            { type: integer, nullable: true }
+        tpdLimit:            { type: integer, nullable: true }
+        weight:              { type: integer }
+        priority:            { type: integer }
+        lastHealthCheckAt:   { type: string, format: date-time, nullable: true }
+        lastHealthStatus:    { type: string, enum: [ok, degraded, error, unknown], nullable: true }
+        lastHealthError:     { type: string, nullable: true }
+        lastHealthLatencyMs: { type: integer, nullable: true }
+    CreateAccountKeyRequest:
+      type: object
+      required: [code, partnerCode, apiKey]
+      properties:
+        code:
+          type: string
+          minLength: 2
+          maxLength: 100
+          pattern: "^[a-zA-Z0-9_-]+$"
+        partnerCode: { type: string, maxLength: 100 }
+        apiKey:
+          type: string
+          minLength: 8
+          maxLength: 2048
+          description: Raw provider API key. Encrypted at rest immediately; never returned in any response.
+        name:        { type: string, maxLength: 255, nullable: true }
+        rpmLimit:    { type: integer, minimum: 1, maximum: 10000, nullable: true }
+        rpdLimit:    { type: integer, minimum: 1, maximum: 1000000, nullable: true }
+        tpmLimit:    { type: integer, minimum: 1, maximum: 10000000, nullable: true }
+        tpdLimit:    { type: integer, minimum: 1, maximum: 1000000000, nullable: true }
+        weight:      { type: integer, minimum: 1, maximum: 1000, default: 100 }
+        priority:    { type: integer, minimum: 1, maximum: 1000, default: 100 }
+    UpdateAccountKeyRequest:
+      type: object
+      description: All fields optional. apiKey, if supplied, rotates the encrypted secret.
+      properties:
+        apiKey:   { type: string, minLength: 8, maxLength: 2048, nullable: true }
+        name:     { type: string, maxLength: 255, nullable: true }
+        status:   { type: string, maxLength: 20, nullable: true }
+        rpmLimit: { type: integer, minimum: 1, maximum: 10000, nullable: true }
+        rpdLimit: { type: integer, minimum: 1, maximum: 1000000, nullable: true }
+        tpmLimit: { type: integer, minimum: 1, maximum: 10000000, nullable: true }
+        tpdLimit: { type: integer, minimum: 1, maximum: 1000000000, nullable: true }
+        weight:   { type: integer, minimum: 1, maximum: 1000, nullable: true }
+        priority: { type: integer, minimum: 1, maximum: 1000, nullable: true }
+    AccountKeyHealthDto:
+      type: object
+      properties:
+        id:                  { type: integer, format: int64 }
+        code:                { type: string }
+        partnerCode:         { type: string }
+        status:              { type: string }
+        lastHealthStatus:    { type: string, nullable: true }
+        lastHealthError:     { type: string, nullable: true }
+        lastHealthLatencyMs: { type: integer, nullable: true }
+        lastHealthCheckAt:   { type: string, format: date-time, nullable: true }
+        inflight:            { type: integer, format: int64, description: Current in-flight count from Redis. }
+        cooldown:            { type: boolean, description: True if key is in cooldown for ANY model. }
+
+    # ─── AI generation ───
+    GenerateAiRequest:
+      type: object
+      required: [model, prompt]
+      properties:
+        model:
+          type: string
+          minLength: 1
+          maxLength: 100
+          description: Internal model alias (e.g. text-fast, text-pro).
+        systemPrompt: { type: string, maxLength: 50000, nullable: true }
+        prompt:       { type: string, minLength: 1, maxLength: 200000 }
+        temperature:  { type: number, minimum: 0, maximum: 2, nullable: true }
+        maxTokens:    { type: integer, minimum: 1, maximum: 32000, nullable: true }
+        requestId:    { type: string, maxLength: 100, nullable: true }
+        featureCode:  { type: string, maxLength: 100, nullable: true }
+        debug:
+          type: boolean
+          default: false
+          description: When true (and server allows), includes routing info in the response.
+        metadata:
+          type: object
+          additionalProperties: true
+    AiUsageDto:
+      type: object
+      properties:
+        inputTokens:  { type: integer, nullable: true }
+        outputTokens: { type: integer, nullable: true }
+        totalTokens:  { type: integer, nullable: true }
+    AiRoutingDto:
+      type: object
+      properties:
+        partnerCode:    { type: string, nullable: true }
+        accountKeyCode: { type: string, nullable: true }
+        routeCode:      { type: string, nullable: true }
+        providerModel:  { type: string, nullable: true }
+        fallbackUsed:   { type: boolean }
+        retryCount:     { type: integer }
+    AiAttemptErrorDto:
+      type: object
+      required: [partnerCode, accountKeyCode]
+      properties:
+        partnerCode:    { type: string }
+        accountKeyCode: { type: string }
+        errorType:
+          type: string
+          description: Normalized error category.
+          enum: [rate_limit, quota_exceeded, timeout, server_error, auth_error, permission_error, bad_response, unknown, local_rpm, local_rpd, local_tpm, local_tpd]
+          nullable: true
+        errorMessage:   { type: string, nullable: true }
+        httpStatus:     { type: integer, nullable: true }
+    GenerateAiResponse:
+      type: object
+      required: [success, requestId, model]
+      properties:
+        success:      { type: boolean }
+        requestId:    { type: string }
+        model:        { type: string }
+        content:      { type: string, nullable: true }
+        usage:        { $ref: '#/components/schemas/AiUsageDto' }
+        latencyMs:    { type: integer }
+        errorType:    { type: string, nullable: true }
+        errorMessage: { type: string, nullable: true }
+        errors:
+          type: array
+          nullable: true
+          items: { $ref: '#/components/schemas/AiAttemptErrorDto' }
+        routing:      { $ref: '#/components/schemas/AiRoutingDto' }
+
+    # ─── Admin: partners ───
+    PartnerDto:
+      type: object
+      properties:
+        id:               { type: integer, format: int64 }
+        code:             { type: string }
+        name:             { type: string }
+        status:           { type: string, enum: [active, disabled] }
+        adapterCode:      { type: string, enum: [gemini, openai_compatible, openrouter] }
+        baseUrl:          { type: string, format: uri }
+        healthCheckModel: { type: string, nullable: true }
+        weight:           { type: integer }
+        priority:         { type: integer }
+        qualityScore:     { type: integer }
+    UpsertPartnerRequest:
+      type: object
+      required: [code, name, adapterCode, baseUrl]
+      properties:
+        code:             { type: string, minLength: 2, maxLength: 100 }
+        name:             { type: string, maxLength: 255 }
+        adapterCode:      { type: string, maxLength: 100, enum: [gemini, openai_compatible, openrouter] }
+        baseUrl:          { type: string, format: uri, maxLength: 500 }
+        healthCheckModel: { type: string, maxLength: 255, nullable: true }
+        status:           { type: string, maxLength: 20, default: active }
+        weight:           { type: integer, minimum: 1, maximum: 1000, default: 100 }
+        priority:         { type: integer, minimum: 1, maximum: 1000, default: 100 }
+        qualityScore:     { type: integer, minimum: 1, maximum: 1000, default: 100 }
+
+    # ─── Admin: models ───
+    ModelDto:
+      type: object
+      properties:
+        id:                 { type: integer, format: int64 }
+        code:               { type: string }
+        name:               { type: string }
+        status:             { type: string }
+        defaultTemperature: { type: number }
+        defaultMaxTokens:   { type: integer }
+        strategy:           { type: string }
+        fallbackEnabled:    { type: boolean }
+        maxRetry:           { type: integer }
+    UpsertModelRequest:
+      type: object
+      required: [code, name]
+      properties:
+        code:               { type: string, minLength: 2, maxLength: 100 }
+        name:               { type: string, maxLength: 255 }
+        status:             { type: string, default: active }
+        defaultTemperature: { type: number, minimum: 0, maximum: 2, default: 0.7 }
+        defaultMaxTokens:   { type: integer, minimum: 1, maximum: 32000, default: 1000 }
+        strategy:           { type: string, maxLength: 100, default: balanced }
+        fallbackEnabled:    { type: boolean, default: true }
+        maxRetry:           { type: integer, minimum: 0, maximum: 10, default: 3 }
+
+    # ─── Admin: routes ───
+    ModelRouteDto:
+      type: object
+      properties:
+        id:            { type: integer, format: int64 }
+        modelCode:     { type: string }
+        partnerCode:   { type: string }
+        routeCode:     { type: string }
+        status:        { type: string }
+        providerModel: { type: string }
+        timeoutMs:     { type: integer }
+        weight:        { type: integer }
+        priority:      { type: integer }
+    UpsertRouteRequest:
+      type: object
+      required: [partnerCode, providerModel]
+      properties:
+        partnerCode:   { type: string, maxLength: 100 }
+        routeCode:     { type: string, maxLength: 100, default: default }
+        providerModel: { type: string, maxLength: 255 }
+        status:        { type: string, default: active }
+        timeoutMs:     { type: integer, minimum: 1000, maximum: 600000, default: 30000 }
+        weight:        { type: integer, minimum: 1, maximum: 1000, default: 100 }
+        priority:      { type: integer, minimum: 1, maximum: 1000, default: 100 }
+
+    UpdateStatusRequest:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string }
+
+    # ─── Dashboard ───
+    DashboardOverviewDto:
+      type: object
+      properties:
+        total:           { type: integer, format: int64 }
+        success:         { type: integer, format: int64 }
+        failed:          { type: integer, format: int64 }
+        fallbackSuccess: { type: integer, format: int64 }
+        errorRate:       { type: number, description: "%" }
+        avgLatencyMs:    { type: number }
+        tokensIn:        { type: integer, format: int64 }
+        tokensOut:       { type: integer, format: int64 }
+        tokensTotal:     { type: integer, format: int64 }
+    DashboardGroupMetricDto:
+      type: object
+      required: [code]
+      properties:
+        code:         { type: string }
+        total:        { type: integer, format: int64 }
+        success:      { type: integer, format: int64 }
+        failed:       { type: integer, format: int64 }
+        errorRate:    { type: number }
+        avgLatencyMs: { type: number }
+    DashboardErrorDto:
+      type: object
+      required: [modelCode, partnerCode, accountKeyCode, errorType]
+      properties:
+        modelCode:      { type: string }
+        partnerCode:    { type: string }
+        accountKeyCode: { type: string }
+        errorType:      { type: string }
+        errorCode:      { type: string, nullable: true }
+        httpStatus:     { type: integer, nullable: true }
+        count:          { type: integer, format: int64 }
+        firstSeenAt:    { type: string, format: date-time, nullable: true }
+        lastSeenAt:     { type: string, format: date-time, nullable: true }
+        lastMessage:    { type: string, nullable: true }

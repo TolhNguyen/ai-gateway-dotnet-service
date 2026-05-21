@@ -1,0 +1,192 @@
+spec_version: "0.1.0"
+service_id: ai-gateway
+display_name: AI Gateway
+description: |
+  Self-contained multi-tenant AI gateway. Provides a unified internal API
+  for AI generation, manages tenant-owned provider API keys, handles routing
+  and fallback across Gemini / Groq / Mistral / OpenRouter / Fireworks,
+  enforces per-key rate limits and token quotas, and surfaces operational
+  metrics. Acts as the AI Capability Node of the Microservice Node
+  Governance Platform — other services consume AI exclusively through it.
+domain: ai-infrastructure
+lifecycle: production
+criticality: high
+
+owner:
+  team: ai-platform-team
+  ba: ba.ai-platform@example.com
+  tech_lead: lead.ai-gateway@example.com
+  devops: devops@example.com
+
+intent_layer:
+  purpose: |
+    Be the only path through which any service in the platform consumes
+    external AI providers. Centralizes provider key isolation, routing,
+    fallback, rate limiting, and usage observability so business services
+    do not have to integrate directly with vendors.
+  business_scope:
+    - Authenticate consumers via JWT or Personal Access Token
+    - Resolve internal model aliases (e.g. text-fast, text-pro) to provider routes
+    - Select and invoke a viable provider route for each request
+    - Manage tenant-owned, encrypted provider API keys
+    - Enforce per-key rate limits and token quotas atomically
+    - Track usage metrics and error aggregates per tenant
+    - Run periodic health checks on tenant provider keys
+    - Provide admin APIs to manage partners, models, and routes
+  out_of_scope:
+    - Storing or scoring prompts and completions for analytics
+    - Vector storage / embeddings persistence (a separate node will own this)
+    - Fine-tuning or model training workflows
+    - Cost billing and invoicing (out to a future billing node)
+    - Multi-region replication of Postgres / Redis
+    - Streaming response support (planned, not yet implemented)
+  business_rules:
+    - id: AIGW-RULE-001
+      rule: |
+        Provider API keys must be encrypted at rest with AES-256-GCM. The raw key
+        is never returned after creation and never logged. Only a SHA-256
+        fingerprint or masked value is exposed via the API.
+      criticality: critical
+      owner: Domain Owner
+      rationale: |
+        Leaking a tenant's provider key gives the attacker direct billing access
+        to that tenant's external AI account. Implemented by AesGcmSecretProtector
+        + the read paths in AccountKeyService that emit only the fingerprint mask.
+      status: active
+    - id: AIGW-RULE-002
+      rule: |
+        A request may only select from provider keys owned by the authenticated user.
+        Cross-tenant key access must be impossible at the repository layer, not just
+        the service layer.
+      criticality: critical
+      owner: Domain Owner
+      rationale: |
+        Cross-tenant access defeats the multi-tenant isolation guarantee. Enforced
+        by AccountKeyRepository: every read filters WHERE user_id = @u. Route
+        selection joins user_account_keys with k.user_id = @u as the primary filter.
+      status: active
+    - id: AIGW-RULE-003
+      rule: |
+        Quota check and reservation must be atomic. The check-then-write window
+        between reading current usage and incrementing it must be eliminated.
+      criticality: high
+      owner: Tech Lead
+      rationale: |
+        Concurrent requests against the same key can both pass an independent
+        check, then both reserve, exceeding the limit. Enforced by Lua scripts
+        AccountReserveLua / UserReserveLua executed via EVAL.
+      status: active
+    - id: AIGW-RULE-004
+      rule: |
+        Fallback only occurs while the model's FallbackEnabled flag is true,
+        the remaining retry budget is positive, and at least one untried
+        candidate is available.
+      criticality: high
+      owner: BA
+      rationale: |
+        Unconstrained fallback amplifies cost during incidents and can stampede
+        a single working provider. The cap is configured per model and enforced
+        in AiGatewayService.GenerateAsync.
+      status: active
+    - id: AIGW-RULE-005
+      rule: |
+        The bootstrap admin account password must be changed before the service
+        is exposed to any other consumer.
+      criticality: medium
+      owner: DevOps
+      rationale: |
+        The default password is documented in README and appsettings.json — public
+        knowledge for anyone reading the source. Program.cs emits a warning at
+        bootstrap; this rule mandates acting on it.
+      status: active
+    - id: AIGW-RULE-006
+      rule: |
+        Encrypted provider API keys must never be cached in Redis. Per-user keys
+        are loaded from Postgres on demand for each request.
+      criticality: high
+      owner: Tech Lead
+      rationale: |
+        Encrypted-at-rest only matters if the key surface is small. Caching
+        ciphertext in Redis (a less-hardened store than Postgres in this image)
+        widens the blast radius unnecessarily. Encoded as a deliberate non-cache
+        in AccountKeyService.
+      status: active
+  last_approved_by: ba.ai-platform@example.com
+  last_approved_at: "2026-05-21T00:00:00Z"
+
+implementation_layer:
+  api_contracts:
+    openapi: contracts/openapi.yaml
+  data_ownership:
+    tables:
+      - users
+      - user_personal_access_tokens
+      - ai_partners
+      - ai_models
+      - ai_model_routes
+      - user_account_keys
+      - ai_request_metrics_hourly
+      - ai_error_aggregates
+      - ai_error_events
+      - __schema_migrations
+    streams: []
+    stores:
+      - postgres-bundled
+      - redis-bundled
+  runtime:
+    language: csharp
+    framework: aspnetcore
+    version: "9.0"
+  testing_guide:
+    commands:
+      - dotnet test
+    coverage_target: 70
+
+ai_layer:
+  agent_instructions: ai/AGENTS.md
+  must_read:
+    - intent/business-rules.yaml
+    - intent/out-of-scope.md
+    - contracts/openapi.yaml
+    - ai/AGENTS.md
+    - ai/do-not-touch.yaml
+  do_not_touch:
+    - migrations/**
+    - src/AiGateway.Api/Infrastructure/Redis/RedisRateLimitStore.cs
+    - src/AiGateway.Api/Infrastructure/Security/AesGcmSecretProtector.cs
+    - src/AiGateway.Api/Infrastructure/Security/SecretProtector.cs
+  context_policy:
+    default_scope: service-node-only
+    expand_to_neighbors_when: contract_change_detected
+    max_token_budget: 14000
+    priority_order:
+      - intent
+      - business_rules
+      - contracts
+      - adr
+      - testing
+      - operation
+      - code_excerpts
+  allowed_roles:
+    - consultant
+    - coder
+    - reviewer
+    - tester
+    - ops
+  human_review_required_for:
+    - intent_layer_changes
+    - contract_changes
+    - do_not_touch_changes
+    - schema_migrations
+    - auth_changes
+
+dependencies: []
+
+tags:
+  - scpa
+  - ai-infrastructure
+  - multi-tenant
+  - gateway
+
+metadata:
+  scp_version: "0.1.0"

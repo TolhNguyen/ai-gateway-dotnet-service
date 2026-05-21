@@ -1,0 +1,107 @@
+# Data ownership declaration. The Governance Center uses this to build
+# the platform-wide data map and to detect ownership conflicts.
+#
+# AI Gateway runs Postgres + Redis inside its container image. It owns
+# the schemas and namespaces below — no other service may write to them.
+# Other services that need this data must call AI Gateway's REST API.
+
+owned_tables:
+  - name: users
+    db: postgres-bundled
+    description: |
+      Self-managed user table for the gateway's own auth. NOT the platform's
+      identity store — when a real identity node lands, this will become a
+      thin shadow keyed by external sub. Until then, AI Gateway owns it
+      exclusively.
+    read_grants: []
+    write_grants: []
+
+  - name: user_personal_access_tokens
+    db: postgres-bundled
+    description: |
+      PATs for backend integrations. Tokens are SHA-256 hashed; the prefix
+      is stored separately for UI display.
+    read_grants: []
+    write_grants: []
+
+  - name: ai_partners
+    db: postgres-bundled
+    description: |
+      System-wide AI provider definitions. Admin-managed via /v1/admin/partners.
+    read_grants: []
+    write_grants: []
+
+  - name: ai_models
+    db: postgres-bundled
+    description: |
+      Internal model aliases (e.g. text-fast, text-pro). Admin-managed.
+    read_grants: []
+    write_grants: []
+
+  - name: ai_model_routes
+    db: postgres-bundled
+    description: |
+      Maps (model, partner) to a provider model + timeout + weight. The
+      runtime route table.
+    read_grants: []
+    write_grants: []
+
+  - name: user_account_keys
+    db: postgres-bundled
+    description: |
+      Per-user provider API keys, encrypted with AES-256-GCM. See AIGW-RULE-001
+      and AIGW-RULE-002. Never readable by any other service.
+    read_grants: []
+    write_grants: []
+
+  - name: ai_request_metrics_hourly
+    db: postgres-bundled
+    description: |
+      Hourly metric buckets per (user, model, partner, key). Flushed from
+      Redis by MetricFlushWorker on a 30-second cadence.
+    read_grants: []
+    write_grants: []
+
+  - name: ai_error_aggregates
+    db: postgres-bundled
+    description: |
+      Error aggregates keyed by (user, model, partner, key, type, code, status).
+      One row per distinct error fingerprint.
+    read_grants: []
+    write_grants: []
+
+  - name: ai_error_events
+    db: postgres-bundled
+    description: |
+      Sampled raw error events, capped per (hour, key, type) to avoid
+      runaway logging. Pruned hourly by CleanupWorker.
+    read_grants: []
+    write_grants: []
+
+  - name: __schema_migrations
+    db: postgres-bundled
+    description: |
+      MigrationRunner state. Tracks applied SQL files and their SHA-256
+      checksums. Never edit manually.
+    read_grants: []
+    write_grants: []
+
+owned_streams: []
+
+owned_redis_namespaces:
+  - prefix: "ai:quota:"
+    description: Per-key request and token quota counters (Lua-atomic).
+  - prefix: "ai:rate:"
+    description: Per-user rate-limit counters.
+  - prefix: "ai:cooldown:"
+    description: Cooldown markers for partners, keys, and (key, model) pairs.
+  - prefix: "ai:inflight:"
+    description: In-flight request counters for load-aware route scoring.
+  - prefix: "ai:metric:"
+    description: Hourly metric buffers awaiting flush to Postgres.
+  - prefix: "ai:config:"
+    description: Cached partner/model/route lookups. Never caches encrypted user keys (AIGW-RULE-006).
+  - prefix: "ai:error_cap:"
+    description: Per-(hour, key, type) counters for capping raw event sampling.
+  - prefix: "ai:lock:"
+    description: Per-key single-flight semaphores for cache-aside loads.

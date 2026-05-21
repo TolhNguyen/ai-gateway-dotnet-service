@@ -1,0 +1,44 @@
+# Fine-grained context shape policy. Read by the MCP server when assembling
+# a context pack for an agent.
+
+default_scope: service-node-only
+
+expand_to_neighbors_when: contract_change_detected
+# AI Gateway has no upstream SCPA dependencies (Postgres and Redis are
+# bundled, AI providers are external). Setting 'contract_change_detected'
+# keeps the door open: if and when a future SCPA node consumes
+# /v1/ai/generate, contract-impact analysis can pull THEIR SCP to assess
+# blast radius. For now this is a no-op.
+
+max_token_budget: 14000
+
+priority_order:
+  - intent
+  - business_rules
+  - contracts
+  - adr
+  - testing
+  - operation
+  - code_excerpts
+
+roles:
+  consultant:
+    # BA / PM / PO asking "what does this service do?"
+    can_read:  [intent, contracts, operation]
+    can_write: []
+  coder:
+    # Dev with intent to change code.
+    can_read:  [all]
+    can_write: [src, tests, docs, contracts]
+  reviewer:
+    # PR reviewer (AI or human).
+    can_read:  [all]
+    can_write: [comments]
+  tester:
+    # Writing or running tests.
+    can_read:  [intent, contracts, src, tests]
+    can_write: [tests]
+  ops:
+    # On-call / SRE looking at runbook + SLO + recent errors.
+    can_read:  [operation, dependencies, intent]
+    can_write: []

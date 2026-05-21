@@ -1,0 +1,9 @@
+# Files the MCP server pre-loads into context for any task on AI Gateway.
+# Order matters — earlier entries are loaded first if token budget runs low.
+
+must_read:
+  - intent/business-rules.yaml
+  - intent/out-of-scope.md
+  - ai/AGENTS.md
+  - ai/do-not-touch.yaml
+  - contracts/openapi.yaml

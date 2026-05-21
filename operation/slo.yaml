@@ -1,0 +1,39 @@
+slos:
+  - id: availability
+    description: |
+      /v1/ai/generate returns a non-5xx response.
+      (4xx responses to invalid input or rate-limit count as availability;
+      they represent the system working correctly.)
+    target: 99.5
+    window: 30d
+
+  - id: latency-p95
+    description: |
+      End-to-end latency for /v1/ai/generate, measured server-side. Excludes
+      requests where the model itself genuinely takes >5s of upstream time
+      (text-pro routes). Track p95 against text-fast routes only.
+    target_ms: 3000
+    window: 7d
+
+  - id: fallback-success
+    description: |
+      Of requests that hit a fallback path, the proportion that ultimately
+      succeed. Below target means our cooldown logic is too aggressive or
+      partner diversity is too low.
+    target: 90
+    window: 7d
+
+  - id: error-rate
+    description: |
+      Failed requests / total requests across all tenants. Sustained breach
+      means a partner outage that's outliving its cooldown.
+    target_max: 5
+    window: 1h
+
+  - id: health-check-coverage
+    description: |
+      Proportion of active user_account_keys with a last_health_check_at
+      within the last 30 minutes. Below target means HealthCheckWorker is
+      lagging or crashed.
+    target: 95
+    window: 30m

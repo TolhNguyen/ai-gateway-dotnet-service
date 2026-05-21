@@ -1,0 +1,23 @@
+# This is the ONLY SCPA workflow this repo ships. It delegates to the
+# central reusable workflow in scpa-governance-center, so policy and
+# gate logic stays consistent across the federation.
+#
+# The reusable workflow:
+#   1. Validates scp.yaml against the SCPA schemas.
+#   2. Detects intent/ changes and enforces BA / PO / Domain Owner approval.
+#   3. On push to main, POSTs scp.yaml to the Governance Center for reindex.
+
+name: SCPA
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  scpa:
+    uses: your-org/scpa-governance-center/.github/workflows/scpa-validate.yml@v1
+    with:
+      spec_version: "0.1.0"
+      governance_center_url: https://scpa-governance.internal.example.com
+    secrets: inherit

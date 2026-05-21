@@ -1,0 +1,37 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: ai-gateway
+  title: AI Gateway
+  description: |
+    Multi-tenant AI gateway. The AI Capability Node of the Microservice
+    Node Governance Platform. Centralizes provider key isolation, routing,
+    fallback, rate limiting, and usage observability so business services
+    do not have to integrate directly with AI vendors.
+  annotations:
+    scpa.dev/scp-path: scp.yaml
+    scpa.dev/spec-version: "0.1.0"
+    backstage.io/techdocs-ref: dir:.
+  tags:
+    - scpa
+    - ai-infrastructure
+    - multi-tenant
+    - csharp
+    - aspnetcore
+  links:
+    - title: Internal portal
+      url: https://ai-gateway.internal.example.com
+      icon: dashboard
+    - title: Source
+      url: https://github.com/your-org/ai-gateway
+      icon: github
+spec:
+  type: service
+  lifecycle: production
+  owner: ai-platform-team
+  domain: ai-infrastructure
+  providesApis:
+    - ai-gateway-rest
+  dependsOn:
+    - resource:postgres-bundled
+    - resource:redis-bundled
