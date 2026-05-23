@@ -16,8 +16,8 @@ services:
     environment:
       # All app-level config has sensible defaults baked in.
       # Override anything here if you need to.
-      AiGateway__BootstrapAdminEmail: "[email protected]"
-      AiGateway__BootstrapAdminPassword: "ChangeMe!2026"
+      AiGateway__BootstrapAdminEmail: "admin@aigateway.local"
+      AiGateway__BootstrapAdminPassword: "admin@2026"
     volumes:
       - aigateway-pg:/var/lib/postgresql/data
       - aigateway-redis:/var/lib/redis

@@ -10,8 +10,8 @@ public sealed record AiMessageDto
 
 public sealed record GenerateAiRequest
 {
-    [Required, StringLength(100, MinimumLength = 1)]
-    public required string Model { get; init; }
+    [StringLength(100)]
+    public string? Model { get; init; }
 
     [StringLength(50_000)]
     public string? SystemPrompt { get; init; }
@@ -34,6 +34,16 @@ public sealed record GenerateAiRequest
     public bool Debug { get; init; }
 
     public Dictionary<string, object?> Metadata { get; init; } = new();
+}
+
+public sealed record AvailableModelDto
+{
+    public required string Code { get; init; }
+    public required string Name { get; init; }
+    public required string PartnerCode { get; init; }
+    public required string PartnerName { get; init; }
+    public decimal DefaultTemperature { get; init; }
+    public int DefaultMaxTokens { get; init; }
 }
 
 public sealed record AiUsageDto

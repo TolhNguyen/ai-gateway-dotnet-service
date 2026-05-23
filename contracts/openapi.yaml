@@ -153,6 +153,21 @@ paths:
         '204': { description: Revoked. }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  /v1/me/models:
+    get:
+      tags: [me]
+      operationId: getMyAvailableModels
+      summary: List models available to the user based on active partner keys in their account.
+      responses:
+        '200':
+          description: List of available models.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/AvailableModelDto' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
   /v1/me/keys:
     get:
       tags: [me]
@@ -623,6 +638,7 @@ components:
           type: string
           description: SHA-256 fingerprint prefix. The raw key is never returned.
           example: "sha256:7a3f9c01..."
+        defaultModelCode:    { type: string, nullable: true }
         rpmLimit:            { type: integer, nullable: true }
         rpdLimit:            { type: integer, nullable: true }
         tpmLimit:            { type: integer, nullable: true }
@@ -648,6 +664,7 @@ components:
           minLength: 8
           maxLength: 2048
           description: Raw provider API key. Encrypted at rest immediately; never returned in any response.
+        defaultModelCode: { type: string, maxLength: 100, nullable: true }
         name:        { type: string, maxLength: 255, nullable: true }
         rpmLimit:    { type: integer, minimum: 1, maximum: 10000, nullable: true }
         rpdLimit:    { type: integer, minimum: 1, maximum: 1000000, nullable: true }
@@ -662,6 +679,8 @@ components:
         apiKey:   { type: string, minLength: 8, maxLength: 2048, nullable: true }
         name:     { type: string, maxLength: 255, nullable: true }
         status:   { type: string, maxLength: 20, nullable: true }
+        defaultModelCode: { type: string, maxLength: 100, nullable: true }
+        updateDefaultModel: { type: boolean }
         rpmLimit: { type: integer, minimum: 1, maximum: 10000, nullable: true }
         rpdLimit: { type: integer, minimum: 1, maximum: 1000000, nullable: true }
         tpmLimit: { type: integer, minimum: 1, maximum: 10000000, nullable: true }
@@ -685,12 +704,12 @@ components:
     # ─── AI generation ───
     GenerateAiRequest:
       type: object
-      required: [model, prompt]
+      required: [prompt]
       properties:
         model:
           type: string
-          minLength: 1
           maxLength: 100
+          nullable: true
           description: Internal model alias (e.g. text-fast, text-pro).
         systemPrompt: { type: string, maxLength: 50000, nullable: true }
         prompt:       { type: string, minLength: 1, maxLength: 200000 }
@@ -873,3 +892,14 @@ components:
         firstSeenAt:    { type: string, format: date-time, nullable: true }
         lastSeenAt:     { type: string, format: date-time, nullable: true }
         lastMessage:    { type: string, nullable: true }
+
+    AvailableModelDto:
+      type: object
+      required: [code, name, partnerCode, partnerName]
+      properties:
+        code:               { type: string }
+        name:               { type: string }
+        partnerCode:        { type: string }
+        partnerName:        { type: string }
+        defaultTemperature: { type: number }
+        defaultMaxTokens:   { type: integer }

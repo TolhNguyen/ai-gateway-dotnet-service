@@ -230,4 +230,45 @@ public sealed class AiConfigRepository
 
         return rows.ToList();
     }
+
+    // ─────── Available models for a user ───────
+
+    public async Task<IReadOnlyList<AvailableModelRow>> GetAvailableModelsForUserAsync(
+        long userId, CancellationToken ct = default)
+    {
+        const string sql = """
+        SELECT DISTINCT
+            m.code          AS ModelCode,
+            m.name          AS ModelName,
+            m.status        AS ModelStatus,
+            m.default_temperature AS DefaultTemperature,
+            m.default_max_tokens  AS DefaultMaxTokens,
+            p.code          AS PartnerCode,
+            p.name          AS PartnerName
+        FROM ai_models m
+        JOIN ai_model_routes r ON r.model_id = m.id
+        JOIN ai_partners p ON p.id = r.partner_id
+        JOIN user_account_keys k ON k.partner_id = p.id AND k.user_id = @u
+        WHERE m.status = 'active'
+          AND r.status = 'active'
+          AND p.status = 'active'
+          AND k.status = 'active'
+        ORDER BY m.code, p.code
+        """;
+        await using var conn = await _ds.OpenConnectionAsync(ct);
+        var rows = await conn.QueryAsync<AvailableModelRow>(sql, new { u = userId });
+        return rows.ToList();
+    }
+}
+
+/// <summary>Flat row returned by GetAvailableModelsForUserAsync.</summary>
+public sealed record AvailableModelRow
+{
+    public string ModelCode { get; init; } = string.Empty;
+    public string ModelName { get; init; } = string.Empty;
+    public string ModelStatus { get; init; } = string.Empty;
+    public decimal DefaultTemperature { get; init; }
+    public int DefaultMaxTokens { get; init; }
+    public string PartnerCode { get; init; } = string.Empty;
+    public string PartnerName { get; init; } = string.Empty;
 }

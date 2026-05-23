@@ -71,7 +71,7 @@ public sealed class ApiKeyHealthCheckService
             Prompt = "ping",
             SystemPrompt = null,
             Temperature = 0m,
-            MaxTokens = 1
+            MaxTokens = 100
         };
 
         var sw = Stopwatch.StartNew();

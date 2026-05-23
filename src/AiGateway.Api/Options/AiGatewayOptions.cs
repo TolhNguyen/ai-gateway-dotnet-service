@@ -40,3 +40,12 @@ public sealed class OpenRouterOptions
     public string AppReferer { get; set; } = "https://github.com/your-org/ai-gateway";
     public string AppTitle   { get; set; } = "AI Gateway";
 }
+
+public sealed class ClaudeOptions
+{
+    /// <summary>
+    /// Anthropic API version header value sent with every request.
+    /// See https://docs.anthropic.com/en/api/versioning
+    /// </summary>
+    public string AnthropicVersion { get; set; } = "2023-06-01";
+}

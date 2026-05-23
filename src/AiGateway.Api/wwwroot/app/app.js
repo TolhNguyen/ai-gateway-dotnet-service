@@ -1,7 +1,7 @@
 // ────────────────────────────────────────────────────────────
 // State + helpers
 // ────────────────────────────────────────────────────────────
-const $  = (s, r = document) => r.querySelector(s);
+const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 
 const token = sessionStorage.getItem('ai_gw_token');
@@ -22,7 +22,7 @@ async function api(path, opts = {}) {
 }
 
 function fmt(d) { return d ? new Date(d).toLocaleString() : '—'; }
-function escape(s) { return String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function escape(s) { return String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 
 // ────────────────────────────────────────────────────────────
 // Tabs
@@ -51,7 +51,7 @@ $('#btnLogout').onclick = () => { sessionStorage.clear(); location.href = '/'; }
 function loadTab(t) {
     const loaders = {
         keys: loadKeys, tokens: loadTokens, dashboard: loadDashboard,
-        errors: loadErrors, admin: loadAdmin, playground: () => {}
+        errors: loadErrors, admin: loadAdmin, playground: () => { }
     };
     loaders[t]?.();
 }
@@ -69,6 +69,39 @@ function closeModal() { $('#modal').close(); }
 // My Keys
 // ────────────────────────────────────────────────────────────
 let partners = [];
+const defaultModelOptionsByPartner = {
+    gemini: [
+        { code: 'text-fast', label: 'Gemini 2.5 Flash (text-fast)' }
+    ],
+    groq: [
+        { code: 'text-pro', label: 'Llama 3.3 70B Versatile (text-pro)' },
+        { code: 'text-fast', label: 'Llama 3.1 8B Instant (text-fast)' }
+    ],
+    mistral: [
+        { code: 'text-pro', label: 'Mistral Large (text-pro)' },
+        { code: 'text-fast', label: 'Mistral Small (text-fast)' }
+    ],
+    openrouter: [
+        { code: 'text-fast', label: 'Llama 3.2 3B Free (text-fast)' }
+    ],
+    claude: [
+        { code: 'text-pro', label: 'Claude Sonnet 4.6 (text-pro)' },
+        { code: 'text-pro', label: 'Claude Haiku 4.5 (text-pro)' }
+    ]
+};
+
+function renderDefaultModelOptions(partnerCode, selectedCode = '') {
+    let selectedApplied = false;
+    const options = defaultModelOptionsByPartner[partnerCode] || [];
+    return [
+        '<option value="">No default</option>',
+        ...options.map(m => {
+            const selected = !selectedApplied && selectedCode === m.code ? (selectedApplied = true, ' selected') : '';
+            return `<option value="${escape(m.code)}"${selected}>${escape(m.label)}</option>`;
+        })
+    ].join('');
+}
+
 async function loadPartners() {
     if (partners.length) return partners;
     // Public partners list: use admin endpoint if admin, otherwise derive from existing keys + a known seed set.
@@ -76,11 +109,12 @@ async function loadPartners() {
         partners = await api('/v1/admin/partners');
     } else {
         partners = [
-            {code:'gemini',name:'Google Gemini'},
-            {code:'groq',name:'Groq'},
-            {code:'mistral',name:'Mistral AI'},
-            {code:'openrouter',name:'OpenRouter'},
-            {code:'fireworks',name:'Fireworks AI'}
+            { code: 'gemini', name: 'Google Gemini' },
+            { code: 'groq', name: 'Groq' },
+            { code: 'mistral', name: 'Mistral AI' },
+            { code: 'openrouter', name: 'OpenRouter' },
+            { code: 'fireworks', name: 'Fireworks AI' },
+            { code: 'claude', name: 'Anthropic Claude' }
         ];
     }
     return partners;
@@ -94,14 +128,14 @@ async function loadKeys() {
     const rows = keys.map(k => {
         const h = healthMap[k.id];
         const dot = h?.lastHealthStatus === 'ok' ? '🟢' :
-                    h?.lastHealthStatus === 'degraded' ? '🟡' :
-                    h?.lastHealthStatus === 'error' ? '🔴' : '⚪';
+            h?.lastHealthStatus === 'degraded' ? '🟡' :
+                h?.lastHealthStatus === 'error' ? '🔴' : '⚪';
         return `<tr>
-          <td><strong>${escape(k.code)}</strong><br><span class="muted">${escape(k.partnerCode)}</span></td>
+          <td><strong>${escape(k.code)}</strong><br><span class="muted">${escape(k.partnerCode)}</span>${k.defaultModelCode ? `<br><span class="muted">Default: ${escape(k.defaultModelCode)}</span>` : ''}</td>
           <td><code>${escape(k.apiKeyMask)}</code></td>
           <td>${dot} ${escape(h?.lastHealthStatus || 'unknown')}
               <br><span class="muted">${fmt(h?.lastHealthCheckAt)} • ${h?.lastHealthLatencyMs ?? '—'} ms</span>
-              ${h?.lastHealthError ? `<br><span class="error-text">${escape(h.lastHealthError).slice(0,120)}</span>` : ''}</td>
+              ${h?.lastHealthError ? `<br><span class="error-text">${escape(h.lastHealthError).slice(0, 120)}</span>` : ''}</td>
           <td>${h?.inflight ?? 0} in-flight ${h?.cooldown ? '• ❄️ cooldown' : ''}</td>
           <td>
             <span class="pill ${k.status}">${escape(k.status)}</span>
@@ -142,6 +176,8 @@ $('#btnNewKey').onclick = () => openKeyForm();
 
 async function openKeyForm(existing) {
     const ps = await loadPartners();
+    const selectedPartnerCode = existing?.partnerCode || ps[0]?.code || '';
+    const modelOpts = renderDefaultModelOptions(selectedPartnerCode, existing?.defaultModelCode || '');
     const opts = ps.map(p => `<option value="${p.code}" ${existing?.partnerCode === p.code ? 'selected' : ''}>${escape(p.code)} — ${escape(p.name)}</option>`).join('');
 
     showModal(`
@@ -149,6 +185,7 @@ async function openKeyForm(existing) {
       <form id="formKey" class="form-grid">
         <label>Code <input name="code" required pattern="^[a-zA-Z0-9_\\-]+$" value="${escape(existing?.code || '')}" ${existing ? 'readonly' : ''} /></label>
         <label>Partner <select name="partnerCode" required ${existing ? 'disabled' : ''}>${opts}</select></label>
+        <label>Default model <select name="defaultModelCode">${modelOpts}</select></label>
         <label>Friendly name <input name="name" value="${escape(existing?.name || '')}" /></label>
         <label>API key ${existing ? '<span class="muted">(leave blank to keep)</span>' : ''}
           <input name="apiKey" type="password" ${existing ? '' : 'required'} minlength="8" />
@@ -164,6 +201,14 @@ async function openKeyForm(existing) {
       </form>
     `);
 
+    if (!existing) {
+        const partnerSelect = $('#formKey [name="partnerCode"]');
+        const defaultModelSelect = $('#formKey [name="defaultModelCode"]');
+        partnerSelect.onchange = () => {
+            defaultModelSelect.innerHTML = renderDefaultModelOptions(partnerSelect.value);
+        };
+    }
+
     $('#formKey').onsubmit = async (e) => {
         e.preventDefault();
         const f = new FormData(e.target);
@@ -173,17 +218,22 @@ async function openKeyForm(existing) {
                 const body = {};
                 if (f.get('apiKey')) body.apiKey = f.get('apiKey');
                 body.name = f.get('name') || null;
-                ['rpmLimit','rpdLimit','tpmLimit','tpdLimit','weight','priority']
+                body.defaultModelCode = f.get('defaultModelCode') || null;
+                body.updateDefaultModel = true;
+                ['rpmLimit', 'rpdLimit', 'tpmLimit', 'tpdLimit', 'weight', 'priority']
                     .forEach(k => { const v = num(k); if (v !== null) body[k] = v; });
                 await api(`/v1/me/keys/${existing.id}`, { method: 'PUT', body: JSON.stringify(body) });
             } else {
-                await api('/v1/me/keys', { method: 'POST', body: JSON.stringify({
-                    code: f.get('code'), partnerCode: f.get('partnerCode'),
-                    apiKey: f.get('apiKey'), name: f.get('name') || null,
-                    rpmLimit: num('rpmLimit'), rpdLimit: num('rpdLimit'),
-                    tpmLimit: num('tpmLimit'), tpdLimit: num('tpdLimit'),
-                    weight: num('weight') || 100, priority: num('priority') || 100
-                })});
+                await api('/v1/me/keys', {
+                    method: 'POST', body: JSON.stringify({
+                        code: f.get('code'), partnerCode: f.get('partnerCode'),
+                        apiKey: f.get('apiKey'), name: f.get('name') || null,
+                        defaultModelCode: f.get('defaultModelCode') || null,
+                        rpmLimit: num('rpmLimit'), rpdLimit: num('rpdLimit'),
+                        tpmLimit: num('tpmLimit'), tpdLimit: num('tpdLimit'),
+                        weight: num('weight') || 100, priority: num('priority') || 100
+                    })
+                });
             }
             closeModal();
             loadKeys();
@@ -233,10 +283,12 @@ $('#btnNewToken').onclick = () => {
         e.preventDefault();
         const f = new FormData(e.target);
         try {
-            const r = await api('/v1/me/tokens', { method: 'POST', body: JSON.stringify({
-                name: f.get('name'),
-                expiresInDays: f.get('expiresInDays') ? Number(f.get('expiresInDays')) : null
-            })});
+            const r = await api('/v1/me/tokens', {
+                method: 'POST', body: JSON.stringify({
+                    name: f.get('name'),
+                    expiresInDays: f.get('expiresInDays') ? Number(f.get('expiresInDays')) : null
+                })
+            });
             showModal(`
               <h3>Token created — copy it now</h3>
               <p class="muted">This is the only time the full token will be shown.</p>
@@ -263,12 +315,12 @@ async function loadDashboard() {
       <div class="tile bad"><span class="num">${d.failed}</span><span class="lbl">Failed</span></div>
       <div class="tile"><span class="num">${d.errorRate}%</span><span class="lbl">Error rate</span></div>
       <div class="tile"><span class="num">${Math.round(d.avgLatencyMs)} ms</span><span class="lbl">Avg latency</span></div>
-      <div class="tile"><span class="num">${(d.tokensTotal/1000).toFixed(1)}k</span><span class="lbl">Total tokens</span></div>
+      <div class="tile"><span class="num">${(d.tokensTotal / 1000).toFixed(1)}k</span><span class="lbl">Total tokens</span></div>
     `;
 
-    fillGroupTable('#tblByModel',   await api(`/v1/me/dashboard/models?hours=${hours}`),  'Model');
+    fillGroupTable('#tblByModel', await api(`/v1/me/dashboard/models?hours=${hours}`), 'Model');
     fillGroupTable('#tblByPartner', await api(`/v1/me/dashboard/partners?hours=${hours}`), 'Partner');
-    fillGroupTable('#tblByKey',     await api(`/v1/me/dashboard/account-keys?hours=${hours}`), 'Account key');
+    fillGroupTable('#tblByKey', await api(`/v1/me/dashboard/account-keys?hours=${hours}`), 'Account key');
 }
 
 function fillGroupTable(sel, rows, label) {
@@ -299,7 +351,7 @@ async function loadErrors() {
         <td>${e.httpStatus ?? '—'}</td>
         <td>${e.count}</td>
         <td>${fmt(e.lastSeenAt)}</td>
-        <td class="msg">${escape((e.lastMessage || '').slice(0,200))}</td>
+        <td class="msg">${escape((e.lastMessage || '').slice(0, 200))}</td>
       </tr>`).join('') || `<tr><td colspan="8" class="muted">No errors in the last 24h.</td></tr>`}</tbody>`;
 }
 
@@ -341,14 +393,16 @@ $('#formPlay').onsubmit = async (e) => {
     const f = new FormData(e.target);
     $('#playOut').textContent = '⏳ Generating…';
     try {
-        const r = await api('/v1/ai/generate', { method: 'POST', body: JSON.stringify({
-            model: f.get('model'),
-            systemPrompt: f.get('systemPrompt') || null,
-            prompt: f.get('prompt'),
-            temperature: Number(f.get('temperature') || 0.7),
-            maxTokens: Number(f.get('maxTokens') || 500),
-            debug: f.get('debug') === 'on'
-        })});
+        const r = await api('/v1/ai/generate', {
+            method: 'POST', body: JSON.stringify({
+                model: f.get('model'),
+                systemPrompt: f.get('systemPrompt') || null,
+                prompt: f.get('prompt'),
+                temperature: Number(f.get('temperature') || 0.7),
+                maxTokens: Number(f.get('maxTokens') || 500),
+                debug: f.get('debug') === 'on'
+            })
+        });
         $('#playOut').textContent = JSON.stringify(r, null, 2);
     } catch (err) {
         $('#playOut').textContent = `Error: ${err.message}\n\n${JSON.stringify(err.body || {}, null, 2)}`;

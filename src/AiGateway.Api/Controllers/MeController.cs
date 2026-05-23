@@ -15,12 +15,14 @@ public sealed class MeController : ControllerBase
     private readonly UserRepository _users;
     private readonly AuthService _auth;
     private readonly ICurrentUser _current;
+    private readonly AiConfigRepository _config;
 
-    public MeController(UserRepository users, AuthService auth, ICurrentUser current)
+    public MeController(UserRepository users, AuthService auth, ICurrentUser current, AiConfigRepository config)
     {
         _users = users;
         _auth = auth;
         _current = current;
+        _config = config;
     }
 
     [HttpGet]
@@ -30,6 +32,23 @@ public sealed class MeController : ControllerBase
         var user = await _users.FindByIdAsync(uid, ct);
         if (user is null) return NotFound();
         return Ok(AuthService.ToDto(user));
+    }
+
+    [HttpGet("models")]
+    public async Task<IActionResult> GetAvailableModels(CancellationToken ct)
+    {
+        if (_current.UserId is not long uid) return Unauthorized();
+        var rows = await _config.GetAvailableModelsForUserAsync(uid, ct);
+        var dtos = rows.Select(r => new AvailableModelDto
+        {
+            Code = r.ModelCode,
+            Name = r.ModelName,
+            PartnerCode = r.PartnerCode,
+            PartnerName = r.PartnerName,
+            DefaultTemperature = r.DefaultTemperature,
+            DefaultMaxTokens = r.DefaultMaxTokens
+        }).ToList();
+        return Ok(dtos);
     }
 
     [HttpGet("tokens")]

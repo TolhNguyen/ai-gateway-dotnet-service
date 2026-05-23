@@ -10,6 +10,7 @@ public sealed record AccountKeyDto
     public string? Name { get; init; }
     public string Status { get; init; } = "active";
     public string ApiKeyMask { get; init; } = string.Empty;
+    public string? DefaultModelCode { get; init; }
     public int? RpmLimit { get; init; }
     public int? RpdLimit { get; init; }
     public int? TpmLimit { get; init; }
@@ -34,6 +35,10 @@ public sealed record CreateAccountKeyRequest
     [Required, StringLength(2048, MinimumLength = 8)]
     public required string ApiKey { get; init; }
 
+    /// <summary>Model code to use by default when calling this key's partner. Optional.</summary>
+    [StringLength(100)]
+    public string? DefaultModelCode { get; init; }
+
     [StringLength(255)]
     public string? Name { get; init; }
 
@@ -57,6 +62,17 @@ public sealed record UpdateAccountKeyRequest
 
     [StringLength(20)]
     public string? Status { get; init; }
+
+    /// <summary>
+    /// Set to a model code to change the default model for this key.
+    /// Pass an empty string "" to clear the default model.
+    /// Pass null to leave it unchanged.
+    /// </summary>
+    [StringLength(100)]
+    public string? DefaultModelCode { get; init; }
+
+    /// <summary>Set to true when DefaultModelCode should be applied (even if null = clear).</summary>
+    public bool UpdateDefaultModel { get; init; }
 
     [Range(1, 10_000)]   public int? RpmLimit { get; init; }
     [Range(1, 1_000_000)] public int? RpdLimit { get; init; }

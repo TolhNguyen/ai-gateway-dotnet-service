@@ -2,6 +2,7 @@ using System.Diagnostics;
 using AiGateway.Api.Application.Config;
 using AiGateway.Api.Contracts;
 using AiGateway.Api.Domain;
+using AiGateway.Api.Infrastructure.Database;
 using AiGateway.Api.Infrastructure.Http;
 using AiGateway.Api.Infrastructure.Partners;
 using AiGateway.Api.Infrastructure.Redis;
@@ -22,6 +23,7 @@ public sealed class AiGatewayService
     private readonly PartnerClientFactory _partnerFactory;
     private readonly TokenEstimator _tokenEstimator;
     private readonly ISecretProtector _protector;
+    private readonly AccountKeyRepository _keyRepo;
     private readonly AiGatewayOptions _opts;
     private readonly ILogger<AiGatewayService> _logger;
 
@@ -35,6 +37,7 @@ public sealed class AiGatewayService
         PartnerClientFactory partnerFactory,
         TokenEstimator tokenEstimator,
         ISecretProtector protector,
+        AccountKeyRepository keyRepo,
         IOptions<AiGatewayOptions> opts,
         ILogger<AiGatewayService> logger)
     {
@@ -47,6 +50,7 @@ public sealed class AiGatewayService
         _partnerFactory = partnerFactory;
         _tokenEstimator = tokenEstimator;
         _protector = protector;
+        _keyRepo = keyRepo;
         _opts = opts.Value;
         _logger = logger;
     }
@@ -58,18 +62,36 @@ public sealed class AiGatewayService
 
         var stopwatch = Stopwatch.StartNew();
 
+        string? resolvedModelCode = req.Model;
+        if (string.IsNullOrWhiteSpace(resolvedModelCode))
+        {
+            var keys = await _keyRepo.ListForUserAsync(userId, ct);
+            var bestKey = keys
+                .Where(k => k.Status == "active" && !string.IsNullOrWhiteSpace(k.DefaultModelCode))
+                .OrderBy(k => k.Priority)
+                .ThenBy(k => k.Code)
+                .FirstOrDefault();
+
+            if (bestKey is null)
+            {
+                return Fail(requestId, string.Empty, stopwatch, "bad_response", "No model specified and no default model configured.");
+            }
+
+            resolvedModelCode = bestKey.DefaultModelCode;
+        }
+
         // Resolve model
-        var model = await _config.GetModelAsync(req.Model, ct);
+        var model = await _config.GetModelAsync(resolvedModelCode!, ct);
         if (model is null || model.Status != "active")
         {
-            return Fail(requestId, req.Model, stopwatch, "bad_response", $"Model '{req.Model}' not found or disabled.");
+            return Fail(requestId, resolvedModelCode ?? string.Empty, stopwatch, "bad_response", $"Model '{resolvedModelCode}' not found or disabled.");
         }
 
         // Pick candidates available for this user
         var candidates = await _routeSelector.GetCandidatesAsync(userId, model, ct);
         if (candidates.Count == 0)
         {
-            return Fail(requestId, req.Model, stopwatch, "permission_error",
+            return Fail(requestId, model.Code, stopwatch, "permission_error",
                 "No active partner key found in your account for this model. Add an API key under My Keys.");
         }
 
@@ -119,7 +141,7 @@ public sealed class AiGatewayService
                     {
                         Success = true,
                         RequestId = requestId,
-                        Model = req.Model,
+                        Model = model.Code,
                         Content = attemptResult.Content,
                         Usage = attemptResult.Usage,
                         LatencyMs = latencyMs,
@@ -171,7 +193,7 @@ public sealed class AiGatewayService
         return new GenerateAiResponse {
             Success = false,
             RequestId = requestId,
-            Model = req.Model,
+            Model = model.Code,
             LatencyMs = (int)stopwatch.ElapsedMilliseconds,
             ErrorType = attemptErrors.LastOrDefault()?.ErrorType ?? "unknown",
             ErrorMessage = attemptErrors.LastOrDefault()?.ErrorMessage ?? "All providers failed.",

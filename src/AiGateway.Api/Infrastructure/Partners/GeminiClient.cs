@@ -76,7 +76,10 @@ public sealed class GeminiClient : IAiPartnerClient
             }
 
             if (string.IsNullOrEmpty(text))
+            {
+                _logger.LogWarning("Gemini response has empty text. Raw response body: {Raw}", raw);
                 return new PartnerGenerateResult { Success = false, ErrorType = "bad_response", ErrorMessage = "empty candidates" };
+            }
 
             return new PartnerGenerateResult
             {

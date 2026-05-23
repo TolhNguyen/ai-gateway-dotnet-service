@@ -60,6 +60,7 @@ public sealed record UserAccountKey
     public int? TpdLimit { get; init; }
     public int Weight { get; init; } = 100;
     public int Priority { get; init; } = 100;
+    public string? DefaultModelCode { get; init; }
     public DateTimeOffset? LastHealthCheckAt { get; init; }
     public string? LastHealthStatus { get; init; }
     public string? LastHealthError { get; init; }

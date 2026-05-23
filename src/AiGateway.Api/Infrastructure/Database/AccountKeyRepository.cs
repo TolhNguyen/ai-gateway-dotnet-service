@@ -17,6 +17,7 @@ public sealed class AccountKeyRepository
                k.rpm_limit AS RpmLimit, k.rpd_limit AS RpdLimit,
                k.tpm_limit AS TpmLimit, k.tpd_limit AS TpdLimit,
                k.weight, k.priority,
+               k.default_model_code AS DefaultModelCode,
                k.last_health_check_at AS LastHealthCheckAt,
                k.last_health_status   AS LastHealthStatus,
                k.last_health_error    AS LastHealthError,
@@ -46,20 +47,21 @@ public sealed class AccountKeyRepository
         long userId, long partnerId, string code, string? name,
         string apiKeyEnc, string fingerprint,
         int? rpm, int? rpd, int? tpm, int? tpd, int weight, int priority,
+        string? defaultModelCode,
         CancellationToken ct = default)
     {
         const string sql = """
         INSERT INTO user_account_keys
             (user_id, partner_id, code, name, api_key_enc, api_key_fingerprint,
-             rpm_limit, rpd_limit, tpm_limit, tpd_limit, weight, priority)
-        VALUES (@u, @p, @code, @name, @enc, @fp, @rpm, @rpd, @tpm, @tpd, @w, @pri)
+             rpm_limit, rpd_limit, tpm_limit, tpd_limit, weight, priority, default_model_code)
+        VALUES (@u, @p, @code, @name, @enc, @fp, @rpm, @rpd, @tpm, @tpd, @w, @pri, @dm)
         RETURNING id
         """;
         await using var conn = await _ds.OpenConnectionAsync(ct);
         var newId = await conn.ExecuteScalarAsync<long>(sql, new
         {
             u = userId, p = partnerId, code, name, enc = apiKeyEnc, fp = fingerprint,
-            rpm, rpd, tpm, tpd, w = weight, pri = priority
+            rpm, rpd, tpm, tpd, w = weight, pri = priority, dm = defaultModelCode
         });
 
         var entity = await FindByIdAsync(userId, newId, ct);
@@ -70,6 +72,7 @@ public sealed class AccountKeyRepository
         long userId, long id,
         string? apiKeyEnc, string? fingerprint, string? name, string? status,
         int? rpm, int? rpd, int? tpm, int? tpd, int? weight, int? priority,
+        string? defaultModelCode, bool updateDefaultModel,
         CancellationToken ct = default)
     {
         const string sql = """
@@ -84,6 +87,7 @@ public sealed class AccountKeyRepository
             tpd_limit           = COALESCE(@tpd, tpd_limit),
             weight              = COALESCE(@w,   weight),
             priority            = COALESCE(@pri, priority),
+            default_model_code  = CASE WHEN @udm THEN @dm ELSE default_model_code END,
             updated_at          = NOW()
         WHERE user_id = @u AND id = @id
         """;
@@ -92,7 +96,8 @@ public sealed class AccountKeyRepository
         {
             id, u = userId,
             enc = apiKeyEnc, fp = fingerprint, name, status,
-            rpm, rpd, tpm, tpd, w = weight, pri = priority
+            rpm, rpd, tpm, tpd, w = weight, pri = priority,
+            dm = defaultModelCode, udm = updateDefaultModel
         });
     }
 

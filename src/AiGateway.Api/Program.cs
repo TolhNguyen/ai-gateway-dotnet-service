@@ -37,6 +37,10 @@ builder.Services
     .AddOptions<OpenRouterOptions>()
     .Bind(builder.Configuration.GetSection("OpenRouter"));
 
+builder.Services
+    .AddOptions<ClaudeOptions>()
+    .Bind(builder.Configuration.GetSection("Claude"));
+
 // ─── Logging ────────────────────────────────────────────────────────────
 builder.Logging.AddSimpleConsole(o =>
 {
@@ -70,6 +74,7 @@ builder.Services.AddSingleton<IConnectionMultiplexer>(_ => ConnectionMultiplexer
 builder.Services.AddHttpClient("gemini");
 builder.Services.AddHttpClient("openai_compatible");
 builder.Services.AddHttpClient("openrouter");
+builder.Services.AddHttpClient("claude");
 
 // ─── Security ─────────────────────────────────────────────────────────
 builder.Services.AddSingleton<ISecretProtector, AesGcmSecretProtector>();
@@ -97,6 +102,7 @@ builder.Services.AddSingleton<RedisConfigCache>();
 builder.Services.AddSingleton<IAiPartnerClient, GeminiClient>();
 builder.Services.AddSingleton<IAiPartnerClient, OpenAiCompatibleClient>();
 builder.Services.AddSingleton<IAiPartnerClient, OpenRouterClient>();
+builder.Services.AddSingleton<IAiPartnerClient, ClaudeClient>();
 builder.Services.AddSingleton<PartnerClientFactory>();
 
 // ─── Application services ─────────────────────────────────────────────

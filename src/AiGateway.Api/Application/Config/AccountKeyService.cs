@@ -46,6 +46,15 @@ public sealed class AccountKeyService
         var partner = await _config.GetPartnerByCodeAsync(req.PartnerCode, ct);
         if (partner is null) return (false, $"Unknown partner '{req.PartnerCode}'.", null);
 
+        if (!string.IsNullOrWhiteSpace(req.DefaultModelCode))
+        {
+            var routes = await _config.ListRoutesForModelAsync(req.DefaultModelCode, ct);
+            if (!routes.Any(r => r.PartnerCode == req.PartnerCode && r.Status == "active"))
+            {
+                return (false, $"Model '{req.DefaultModelCode}' is not supported by partner '{req.PartnerCode}'.", null);
+            }
+        }
+
         var enc = _protector.Protect(req.ApiKey);
         var fp = _hasher.FingerprintHex(req.ApiKey);
 
@@ -54,7 +63,7 @@ public sealed class AccountKeyService
             var created = await _repo.CreateAsync(
                 userId, partner.Id, req.Code, req.Name, enc, fp,
                 req.RpmLimit, req.RpdLimit, req.TpmLimit, req.TpdLimit,
-                req.Weight, req.Priority, ct);
+                req.Weight, req.Priority, req.DefaultModelCode, ct);
 
             await InvalidateUserCacheAsync(userId);
             return (true, null, ToDto(created));
@@ -71,6 +80,21 @@ public sealed class AccountKeyService
         var existing = await _repo.FindByIdAsync(userId, id, ct);
         if (existing is null) return (false, "Not found.", null);
 
+        string? defaultModelCode = null;
+        if (req.UpdateDefaultModel)
+        {
+            defaultModelCode = string.IsNullOrEmpty(req.DefaultModelCode) ? null : req.DefaultModelCode;
+            if (defaultModelCode != null)
+            {
+                var partnerCode = existing.PartnerCode;
+                var routes = await _config.ListRoutesForModelAsync(defaultModelCode, ct);
+                if (!routes.Any(r => r.PartnerCode == partnerCode && r.Status == "active"))
+                {
+                    return (false, $"Model '{defaultModelCode}' is not supported by partner '{partnerCode}'.", null);
+                }
+            }
+        }
+
         string? newEnc = null, newFp = null;
         if (!string.IsNullOrWhiteSpace(req.ApiKey))
         {
@@ -81,7 +105,8 @@ public sealed class AccountKeyService
         var n = await _repo.UpdateAsync(userId, id,
             newEnc, newFp, req.Name, req.Status,
             req.RpmLimit, req.RpdLimit, req.TpmLimit, req.TpdLimit,
-            req.Weight, req.Priority, ct);
+            req.Weight, req.Priority,
+            defaultModelCode, req.UpdateDefaultModel, ct);
 
         if (n == 0) return (false, "Not found.", null);
 
@@ -115,6 +140,7 @@ public sealed class AccountKeyService
     {
         Id = k.Id, PartnerCode = k.PartnerCode, Code = k.Code, Name = k.Name, Status = k.Status,
         ApiKeyMask = Mask(k.ApiKeyFingerprint),
+        DefaultModelCode = k.DefaultModelCode,
         RpmLimit = k.RpmLimit, RpdLimit = k.RpdLimit, TpmLimit = k.TpmLimit, TpdLimit = k.TpdLimit,
         Weight = k.Weight, Priority = k.Priority,
         LastHealthCheckAt = k.LastHealthCheckAt,
