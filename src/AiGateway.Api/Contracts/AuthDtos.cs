@@ -48,6 +48,8 @@ public sealed record CreatePatRequest
 
     [Range(0, 3650)]
     public int? ExpiresInDays { get; init; }
+
+    public bool UseCaveman { get; init; }
 }
 
 public sealed record CreatePatResponse
@@ -58,6 +60,8 @@ public sealed record CreatePatResponse
     public required string Token { get; init; }
     public DateTimeOffset? ExpiresAt { get; init; }
     public DateTimeOffset CreatedAt { get; init; }
+    public bool UseCaveman { get; init; }
+    public string ResponseStyle { get; init; } = "normal";
 }
 
 public sealed record PatDto
@@ -68,4 +72,6 @@ public sealed record PatDto
     public DateTimeOffset? LastUsedAt { get; init; }
     public DateTimeOffset? ExpiresAt { get; init; }
     public DateTimeOffset CreatedAt { get; init; }
+    public bool UseCaveman { get; init; }
+    public string ResponseStyle { get; init; } = "normal";
 }

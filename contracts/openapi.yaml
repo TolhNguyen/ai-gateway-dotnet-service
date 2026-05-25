@@ -603,9 +603,13 @@ components:
       properties:
         name:          { type: string, minLength: 1, maxLength: 255 }
         expiresInDays: { type: integer, minimum: 0, maximum: 3650, nullable: true }
+        useCaveman:
+          type: boolean
+          default: false
+          description: When true, responses generated with this PAT are automatically compressed using Caveman style.
     CreatePatResponse:
       type: object
-      required: [id, name, token, createdAt]
+      required: [id, name, token, createdAt, useCaveman, responseStyle]
       properties:
         id:        { type: integer, format: int64 }
         name:      { type: string }
@@ -615,6 +619,8 @@ components:
           example: aigw_5K3xQs8nLp_vT7yU2eHmA1Bw
         expiresAt: { type: string, format: date-time, nullable: true }
         createdAt: { type: string, format: date-time }
+        useCaveman: { type: boolean }
+        responseStyle: { type: string, enum: [normal, caveman] }
     PatDto:
       type: object
       properties:
@@ -624,6 +630,8 @@ components:
         lastUsedAt:  { type: string, format: date-time, nullable: true }
         expiresAt:   { type: string, format: date-time, nullable: true }
         createdAt:   { type: string, format: date-time }
+        useCaveman:  { type: boolean }
+        responseStyle: { type: string, enum: [normal, caveman] }
 
     # ─── Account keys ───
     AccountKeyDto:

@@ -60,24 +60,26 @@ public sealed class UserRepository
     // ──────────────── PATs ────────────────
 
     public async Task<PersonalAccessToken> CreatePatAsync(
-        long userId, string name, string tokenHash, string tokenPrefix, DateTimeOffset? expiresAt, CancellationToken ct = default)
+        long userId, string name, string tokenHash, string tokenPrefix, DateTimeOffset? expiresAt, string responseStyle, CancellationToken ct = default)
     {
         const string sql = """
-        INSERT INTO user_personal_access_tokens (user_id, name, token_hash, token_prefix, expires_at)
-        VALUES (@u, @n, @h, @p, @e)
+        INSERT INTO user_personal_access_tokens (user_id, name, token_hash, token_prefix, expires_at, response_style)
+        VALUES (@u, @n, @h, @p, @e, @s)
         RETURNING id, user_id AS UserId, name, token_hash AS TokenHash, token_prefix AS TokenPrefix,
-                  last_used_at AS LastUsedAt, expires_at AS ExpiresAt, created_at AS CreatedAt;
+                  response_style AS ResponseStyle, last_used_at AS LastUsedAt, expires_at AS ExpiresAt,
+                  created_at AS CreatedAt;
         """;
         await using var conn = await _ds.OpenConnectionAsync(ct);
         return await conn.QuerySingleAsync<PersonalAccessToken>(sql,
-            new { u = userId, n = name, h = tokenHash, p = tokenPrefix, e = expiresAt });
+            new { u = userId, n = name, h = tokenHash, p = tokenPrefix, e = expiresAt, s = responseStyle });
     }
 
     public async Task<PersonalAccessToken?> FindActivePatByHashAsync(string tokenHash, CancellationToken ct = default)
     {
         const string sql = """
         SELECT id, user_id AS UserId, name, token_hash AS TokenHash, token_prefix AS TokenPrefix,
-               last_used_at AS LastUsedAt, expires_at AS ExpiresAt, created_at AS CreatedAt
+               response_style AS ResponseStyle, last_used_at AS LastUsedAt, expires_at AS ExpiresAt,
+               created_at AS CreatedAt
         FROM user_personal_access_tokens
         WHERE token_hash = @h
           AND (expires_at IS NULL OR expires_at > NOW())
@@ -90,7 +92,8 @@ public sealed class UserRepository
     {
         const string sql = """
         SELECT id, user_id AS UserId, name, token_hash AS TokenHash, token_prefix AS TokenPrefix,
-               last_used_at AS LastUsedAt, expires_at AS ExpiresAt, created_at AS CreatedAt
+               response_style AS ResponseStyle, last_used_at AS LastUsedAt, expires_at AS ExpiresAt,
+               created_at AS CreatedAt
         FROM user_personal_access_tokens
         WHERE user_id = @u
         ORDER BY created_at DESC

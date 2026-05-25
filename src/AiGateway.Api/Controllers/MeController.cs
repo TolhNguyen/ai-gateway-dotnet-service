@@ -63,7 +63,7 @@ public sealed class MeController : ControllerBase
     public async Task<IActionResult> CreateToken([FromBody] CreatePatRequest req, CancellationToken ct)
     {
         if (_current.UserId is not long uid) return Unauthorized();
-        var resp = await _auth.CreatePatAsync(uid, req.Name, req.ExpiresInDays, ct);
+        var resp = await _auth.CreatePatAsync(uid, req.Name, req.ExpiresInDays, req.UseCaveman, ct);
         return Ok(resp);
     }
 

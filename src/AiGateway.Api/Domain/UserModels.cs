@@ -19,7 +19,9 @@ public sealed record PersonalAccessToken
     public string Name { get; init; } = string.Empty;
     public string TokenHash { get; init; } = string.Empty;
     public string TokenPrefix { get; init; } = string.Empty;
+    public string ResponseStyle { get; init; } = "normal";
     public DateTimeOffset? LastUsedAt { get; init; }
     public DateTimeOffset? ExpiresAt { get; init; }
     public DateTimeOffset CreatedAt { get; init; }
+    public bool UseCaveman => string.Equals(ResponseStyle, "caveman", StringComparison.OrdinalIgnoreCase);
 }

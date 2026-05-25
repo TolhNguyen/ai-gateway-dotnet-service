@@ -4,6 +4,7 @@ const path = require('path');
 
 const repoRoot = path.resolve(__dirname, '..');
 const appJs = fs.readFileSync(path.join(repoRoot, 'src/AiGateway.Api/wwwroot/app/app.js'), 'utf8');
+const openApi = fs.readFileSync(path.join(repoRoot, 'contracts/openapi.yaml'), 'utf8');
 const migrationsSql = fs
   .readdirSync(path.join(repoRoot, 'migrations'))
   .filter((name) => name.endsWith('.sql'))
@@ -64,4 +65,34 @@ assert(
 assert(
   /p\.code='claude'/.test(migrationsSql),
   'seed data should include Claude model routes'
+);
+
+assert(
+  /name=["']useCaveman["']/.test(appJs),
+  'token creation form should expose the useCaveman checkbox'
+);
+
+assert(
+  /useCaveman:\s*f\.get\(['"]useCaveman['"]\)\s*===\s*['"]on['"]/.test(appJs),
+  'create token request should send useCaveman'
+);
+
+assert(
+  /Response Style/.test(appJs),
+  'token table should show response style'
+);
+
+assert(
+  /response_style\s+VARCHAR\(30\)\s+NOT NULL\s+DEFAULT ['"]normal['"]/.test(migrationsSql),
+  'migration should add PAT response_style with normal default'
+);
+
+assert(
+  /useCaveman:\s*\n\s*type:\s*boolean/.test(openApi),
+  'OpenAPI should include useCaveman'
+);
+
+assert(
+  /responseStyle:\s*\{\s*type:\s*string,\s*enum:\s*\[normal,\s*caveman\]\s*\}/.test(openApi),
+  'OpenAPI should include responseStyle enum'
 );

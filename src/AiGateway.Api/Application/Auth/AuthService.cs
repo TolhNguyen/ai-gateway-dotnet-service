@@ -69,17 +69,18 @@ public sealed class AuthService
     }
 
     public async Task<CreatePatResponse> CreatePatAsync(
-        long userId, string name, int? expiresInDays, CancellationToken ct)
+        long userId, string name, int? expiresInDays, bool useCaveman, CancellationToken ct)
     {
         var raw = _tokenHasher.Generate("aigw");
         var hash = _tokenHasher.Hash(raw);
         var prefix = raw.Length > 12 ? raw[..12] : raw;
+        var responseStyle = useCaveman ? "caveman" : "normal";
 
         DateTimeOffset? expiresAt = expiresInDays is > 0
             ? DateTimeOffset.UtcNow.AddDays(expiresInDays.Value)
             : null;
 
-        var pat = await _users.CreatePatAsync(userId, name, hash, prefix, expiresAt, ct);
+        var pat = await _users.CreatePatAsync(userId, name, hash, prefix, expiresAt, responseStyle, ct);
 
         return new CreatePatResponse
         {
@@ -87,7 +88,9 @@ public sealed class AuthService
             Name = pat.Name,
             Token = raw,                  // returned only at creation
             ExpiresAt = pat.ExpiresAt,
-            CreatedAt = pat.CreatedAt
+            CreatedAt = pat.CreatedAt,
+            UseCaveman = pat.UseCaveman,
+            ResponseStyle = pat.ResponseStyle
         };
     }
 
@@ -109,6 +112,7 @@ public sealed class AuthService
     public static PatDto ToPatDto(PersonalAccessToken p) => new()
     {
         Id = p.Id, Name = p.Name, TokenPrefix = p.TokenPrefix,
-        LastUsedAt = p.LastUsedAt, ExpiresAt = p.ExpiresAt, CreatedAt = p.CreatedAt
+        LastUsedAt = p.LastUsedAt, ExpiresAt = p.ExpiresAt, CreatedAt = p.CreatedAt,
+        UseCaveman = p.UseCaveman, ResponseStyle = p.ResponseStyle
     };
 }

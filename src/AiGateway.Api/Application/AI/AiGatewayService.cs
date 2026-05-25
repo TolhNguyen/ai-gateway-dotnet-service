@@ -14,6 +14,15 @@ namespace AiGateway.Api.Application.AI;
 
 public sealed class AiGatewayService
 {
+    private const string CavemanInstruction = """
+    Respond in Caveman engineering style.
+    Use few words.
+    Keep technical substance.
+    No filler.
+    Prefer: cause, fix, risk, test.
+    Do not remove important warnings.
+    """;
+
     private readonly AiConfigService _config;
     private readonly AiRouteSelector _routeSelector;
     private readonly RedisRateLimitStore _rateStore;
@@ -98,8 +107,9 @@ public sealed class AiGatewayService
         var temperature = req.Temperature ?? model.DefaultTemperature;
         var maxTokens   = req.MaxTokens ?? model.DefaultMaxTokens;
         var reservedOutput = Math.Min(_opts.DefaultReservedOutputTokens, maxTokens);
+        var effectiveSystemPrompt = BuildEffectiveSystemPrompt(req.SystemPrompt, http);
 
-        var inputEstimate = _tokenEstimator.EstimateInputTokens(req.SystemPrompt, req.Prompt);
+        var inputEstimate = _tokenEstimator.EstimateInputTokens(effectiveSystemPrompt, req.Prompt);
         var reservedTotal = inputEstimate + reservedOutput;
 
         var attemptErrors = new List<AiAttemptErrorDto>();
@@ -125,7 +135,7 @@ public sealed class AiGatewayService
 
             try
             {
-                var attemptResult = await CallPartnerAsync(c, req, temperature, maxTokens, ct);
+                var attemptResult = await CallPartnerAsync(c, req, effectiveSystemPrompt, temperature, maxTokens, ct);
 
                 if (attemptResult.Success)
                 {
@@ -202,7 +212,7 @@ public sealed class AiGatewayService
     }
 
     private async Task<PartnerGenerateResult> CallPartnerAsync(
-        RouteCandidate c, GenerateAiRequest req, decimal temperature, int maxTokens, CancellationToken ct)
+        RouteCandidate c, GenerateAiRequest req, string? systemPrompt, decimal temperature, int maxTokens, CancellationToken ct)
     {
         var client = _partnerFactory.Get(c.Partner.AdapterCode);
         var apiKey = _protector.Unprotect(c.Key.ApiKeyEnc);
@@ -218,7 +228,7 @@ public sealed class AiGatewayService
         var pr = new PartnerGenerateRequest
         {
             Prompt = req.Prompt,
-            SystemPrompt = req.SystemPrompt,
+            SystemPrompt = systemPrompt,
             Temperature = temperature,
             MaxTokens = maxTokens
         };
@@ -238,6 +248,25 @@ public sealed class AiGatewayService
 
     private bool ShouldExposeRouting(GenerateAiRequest req)
         => req.Debug && _opts.ExposeRoutingWhenDebug;
+
+    internal static string? BuildEffectiveSystemPrompt(string? systemPrompt, HttpContext? http)
+    {
+        if (!ShouldUseCaveman(http)) return systemPrompt;
+
+        return string.IsNullOrWhiteSpace(systemPrompt)
+            ? CavemanInstruction
+            : $"{systemPrompt}\n\n{CavemanInstruction}";
+    }
+
+    private static bool ShouldUseCaveman(HttpContext? http)
+    {
+        var authMethod = http?.User?.FindFirst("auth_method")?.Value;
+        if (!string.Equals(authMethod, "pat", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        var useCaveman = http?.User?.FindFirst("use_caveman")?.Value;
+        return string.Equals(useCaveman, "true", StringComparison.OrdinalIgnoreCase);
+    }
 
     private static GenerateAiResponse Fail(string requestId, string model, Stopwatch sw, string type, string message)
         => new() { Success = false, RequestId = requestId, Model = model,

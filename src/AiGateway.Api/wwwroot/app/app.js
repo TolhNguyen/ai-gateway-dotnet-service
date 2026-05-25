@@ -71,7 +71,9 @@ function closeModal() { $('#modal').close(); }
 let partners = [];
 const defaultModelOptionsByPartner = {
     gemini: [
-        { code: 'text-fast', label: 'Gemini 2.5 Flash (text-fast)' }
+        { code: 'text-fast', label: 'Gemini 2.5 Flash (text-fast)' },
+        { code: 'text-fast', label: 'Gemini 2.0 Flash (text-fast)' },
+        { code: 'text-pro', label: 'Gemini 2.5 Pro (text-pro)' }
     ],
     groq: [
         { code: 'text-pro', label: 'Llama 3.3 70B Versatile (text-pro)' },
@@ -248,10 +250,12 @@ async function openKeyForm(existing) {
 // ────────────────────────────────────────────────────────────
 async function loadTokens() {
     const list = await api('/v1/me/tokens');
+    const styleLabel = t => (t.responseStyle || (t.useCaveman ? 'caveman' : 'normal')) === 'caveman' ? 'Caveman' : 'Normal';
     const rows = list.map(t => `
       <tr>
         <td><strong>${escape(t.name)}</strong></td>
         <td><code>${escape(t.tokenPrefix)}…</code></td>
+        <td>${styleLabel(t)}</td>
         <td>${fmt(t.createdAt)}</td>
         <td>${fmt(t.lastUsedAt)}</td>
         <td>${fmt(t.expiresAt)}</td>
@@ -259,8 +263,8 @@ async function loadTokens() {
       </tr>`).join('');
 
     $('#tblTokens').innerHTML = `
-      <thead><tr><th>Name</th><th>Prefix</th><th>Created</th><th>Last used</th><th>Expires</th><th></th></tr></thead>
-      <tbody>${rows || '<tr><td colspan="6" class="muted">No tokens yet.</td></tr>'}</tbody>`;
+      <thead><tr><th>Name</th><th>Prefix</th><th>Response Style</th><th>Created</th><th>Last used</th><th>Expires</th><th></th></tr></thead>
+      <tbody>${rows || '<tr><td colspan="7" class="muted">No tokens yet.</td></tr>'}</tbody>`;
 
     $$('#tblTokens [data-revoke]').forEach(b => b.onclick = async () => {
         if (!confirm('Revoke this token?')) return;
@@ -275,6 +279,10 @@ $('#btnNewToken').onclick = () => {
       <form id="formTok" class="form-grid">
         <label>Name <input name="name" required maxlength="255" /></label>
         <label>Expires in days <input name="expiresInDays" type="number" min="1" max="3650" placeholder="never" /></label>
+        <label class="check-row">
+          <input type="checkbox" name="useCaveman" />
+          <span>Use Caveman style for responses generated with this token</span>
+        </label>
         <p id="tokErr" class="error"></p>
         <button class="primary">Create</button>
       </form>
@@ -286,7 +294,8 @@ $('#btnNewToken').onclick = () => {
             const r = await api('/v1/me/tokens', {
                 method: 'POST', body: JSON.stringify({
                     name: f.get('name'),
-                    expiresInDays: f.get('expiresInDays') ? Number(f.get('expiresInDays')) : null
+                    expiresInDays: f.get('expiresInDays') ? Number(f.get('expiresInDays')) : null,
+                    useCaveman: f.get('useCaveman') === 'on'
                 })
             });
             showModal(`

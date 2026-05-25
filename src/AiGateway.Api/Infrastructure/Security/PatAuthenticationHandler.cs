@@ -58,17 +58,24 @@ public sealed class PatAuthenticationHandler : AuthenticationHandler<PatAuthenti
         // Touch last_used_at fire-and-forget — failures here shouldn't block the request.
         _ = _userRepo.TouchPatLastUsedAsync(pat.Id);
 
-        var claims = new[]
+        var claims = BuildClaims(user, pat);
+
+        var identity = new ClaimsIdentity(claims, SchemeName);
+        var ticket = new AuthenticationTicket(new ClaimsPrincipal(identity), SchemeName);
+        return AuthenticateResult.Success(ticket);
+    }
+
+    internal static IEnumerable<Claim> BuildClaims(AiGateway.Api.Domain.User user, AiGateway.Api.Domain.PersonalAccessToken pat)
+    {
+        return new[]
         {
             new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
             new Claim(ClaimTypes.Email, user.Email),
             new Claim(ClaimTypes.Role, user.Role),
             new Claim("auth_method", "pat"),
-            new Claim("pat_id", pat.Id.ToString())
+            new Claim("pat_id", pat.Id.ToString()),
+            new Claim("response_style", pat.ResponseStyle),
+            new Claim("use_caveman", pat.UseCaveman ? "true" : "false")
         };
-
-        var identity = new ClaimsIdentity(claims, SchemeName);
-        var ticket = new AuthenticationTicket(new ClaimsPrincipal(identity), SchemeName);
-        return AuthenticateResult.Success(ticket);
     }
 }
